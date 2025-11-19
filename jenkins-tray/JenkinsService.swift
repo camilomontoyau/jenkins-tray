@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import UserNotifications
 import Security
+import AVFoundation
 
 class JenkinsService: ObservableObject {
     @Published var jobs: [Job] = []
@@ -15,7 +16,7 @@ class JenkinsService: ObservableObject {
     }
     
     private var timer: Timer?
-    private let synthesizer = NSSpeechSynthesizer()
+    private let synthesizer = AVSpeechSynthesizer()
     private let jobsKey = "saved_jenkins_jobs"
     private let urlKey = "jenkins_url"
     private let usernameKey = "jenkins_username"
@@ -63,10 +64,23 @@ class JenkinsService: ObservableObject {
         // Handle full URL input
         if let inputUrl = URL(string: cleanedPath), inputUrl.scheme != nil {
             // User pasted a full URL.
-            // Ideally, we should check if it matches our configured base URL.
-            // For now, we just extract the path.
+            // Extract the path and find the first "/job/" occurrence
             let fullPath = inputUrl.path
-            cleanedPath = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
+            if let jobRange = fullPath.range(of: "/job/") {
+                // Extract everything from the first "/job/" forward
+                cleanedPath = String(fullPath[jobRange.lowerBound...])
+                // Remove leading slash
+                cleanedPath = cleanedPath.hasPrefix("/") ? String(cleanedPath.dropFirst()) : cleanedPath
+            } else {
+                // No "/job/" found, use the whole path
+                cleanedPath = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
+            }
+        } else {
+            // Not a full URL, but check if it contains "/job/" and extract from there
+            if let jobRange = cleanedPath.range(of: "/job/") {
+                cleanedPath = String(cleanedPath[jobRange.lowerBound...])
+                cleanedPath = cleanedPath.hasPrefix("/") ? String(cleanedPath.dropFirst()) : cleanedPath
+            }
         }
         
         cleanedPath = cleanedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -231,7 +245,11 @@ class JenkinsService: ObservableObject {
     
     func notify(job: Job) {
         let text = "Job number \(job.buildId) done. Status: \(job.status.rawValue)"
-        synthesizer.startSpeaking(text)
+        DispatchQueue.main.async {
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+            self.synthesizer.speak(utterance)
+        }
         
         // Notification content matching the screenshot style
         let title = "Jenkins Monitor"
@@ -326,3 +344,4 @@ class KeychainHelper {
         SecItemDelete(query)
     }
 }
+
