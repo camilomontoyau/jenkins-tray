@@ -27,6 +27,7 @@
 		F8A75CC92ECE492900243A0D /* jenkins-tray.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "jenkins-tray.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F8A75CD62ECE492A00243A0D /* jenkins-trayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "jenkins-trayTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F8A75CE02ECE492A00243A0D /* jenkins-trayUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "jenkins-trayUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		F8A75D102ECE5EFD00243A0D /* jenkins-tray.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = "jenkins-tray.xcodeproj"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -89,6 +90,11 @@
 				F8A75CD62ECE492A00243A0D /* jenkins-trayTests.xctest */,
 				F8A75CE02ECE492A00243A0D /* jenkins-trayUITests.xctest */,
 			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F8A75D142ECE5EFD00243A0D /* Products */ = {
+			isa = PBXGroup;
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -198,6 +204,12 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F8A75CCA2ECE492900243A0D /* Products */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = F8A75D142ECE5EFD00243A0D /* Products */;
+					ProjectRef = F8A75D102ECE5EFD00243A0D /* jenkins-tray.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				F8A75CC82ECE492900243A0D /* jenkins-tray */,
@@ -400,7 +412,17 @@
 				DEVELOPMENT_TEAM = N56CTV8S4C;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -432,7 +454,17 @@
 				DEVELOPMENT_TEAM = N56CTV8S4C;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
