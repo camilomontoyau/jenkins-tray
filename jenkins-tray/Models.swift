@@ -5,6 +5,8 @@ enum JobStatus: String, Codable {
     case success = "SUCCESS"
     case failure = "FAILURE"
     case aborted = "ABORTED"
+    case authError = "AUTH_ERROR"
+    case networkError = "NETWORK_ERROR"
     case unknown
 }
 

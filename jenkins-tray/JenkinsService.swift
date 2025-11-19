@@ -128,43 +128,77 @@ class JenkinsService: ObservableObject {
         }
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self, let data = data else { return }
+            guard let self = self else { return }
+            
+            // Handle network error
+            if let error = error {
+                print("Network error: \(error)")
+                DispatchQueue.main.async {
+                    self.updateJobStatus(job, status: .networkError)
+                }
+                return
+            }
             
             if let httpResponse = response as? HTTPURLResponse {
-                 // print("Status code: \(httpResponse.statusCode)")
+                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                     DispatchQueue.main.async {
+                         self.updateJobStatus(job, status: .authError)
+                     }
+                     return
+                 }
+                 
                  if httpResponse.statusCode != 200 {
-                     // Handle error or wait
+                     print("HTTP Error: \(httpResponse.statusCode)")
+                     DispatchQueue.main.async {
+                         self.updateJobStatus(job, status: .networkError)
+                     }
                      return
                  }
             }
+            
+            guard let data = data else { return }
             
             do {
                 let jenkinsResp = try JSONDecoder().decode(JenkinsResponse.self, from: data)
                 
                 DispatchQueue.main.async {
-                    if let index = self.jobs.firstIndex(where: { $0.id == job.id }) {
-                        var updatedJob = self.jobs[index]
-                        updatedJob.lastChecked = Date()
-                        
-                        if let result = jenkinsResp.result {
-                            // Job finished
-                            let newStatus = JobStatus(rawValue: result) ?? .unknown
-                            if updatedJob.status != newStatus {
-                                updatedJob.status = newStatus
-                                self.notify(job: updatedJob)
-                            }
-                        } else if let building = jenkinsResp.building, building {
-                            updatedJob.status = .running
-                        }
-                        
-                        self.jobs[index] = updatedJob
-                        self.saveJobs()
+                    if let result = jenkinsResp.result {
+                        // Job finished
+                        let newStatus = JobStatus(rawValue: result) ?? .unknown
+                        self.updateJobStatus(job, status: newStatus)
+                    } else if let building = jenkinsResp.building, building {
+                        self.updateJobStatus(job, status: .running)
+                    } else {
+                        // Sometimes result is null and building is false (e.g. in queue), treat as running or unknown
+                        self.updateJobStatus(job, status: .running)
                     }
                 }
             } catch {
                 print("Decoding error: \(error)")
+                DispatchQueue.main.async {
+                    self.updateJobStatus(job, status: .unknown)
+                }
             }
         }.resume()
+    }
+    
+    func updateJobStatus(_ job: Job, status: JobStatus) {
+        if let index = self.jobs.firstIndex(where: { $0.id == job.id }) {
+            var updatedJob = self.jobs[index]
+            updatedJob.lastChecked = Date()
+            
+            // Only notify if status changed AND it's a completion status
+            if updatedJob.status != status {
+                updatedJob.status = status
+                
+                if status == .success || status == .failure || status == .aborted {
+                    self.notify(job: updatedJob)
+                }
+            }
+            
+            self.jobs[index] = updatedJob
+            self.saveJobs()
+        }
     }
     
     func notify(job: Job) {

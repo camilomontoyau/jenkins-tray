@@ -111,6 +111,8 @@ struct JobRow: View {
         case .aborted: return .gray
         case .running: return .blue
         case .unknown: return .orange
+        case .authError: return .orange
+        case .networkError: return .red
         }
     }
     
@@ -121,6 +123,8 @@ struct JobRow: View {
         case .aborted: return "stop.circle.fill"
         case .running: return "arrow.triangle.2.circlepath.circle.fill"
         case .unknown: return "questionmark.circle.fill"
+        case .authError: return "lock.slash.fill"
+        case .networkError: return "wifi.slash"
         }
     }
     
