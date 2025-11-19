@@ -5,7 +5,7 @@ A macOS menu bar application to monitor Jenkins jobs, built with Swift and Swift
 ## Features
 - Monitor multiple Jenkins jobs simultaneously.
 - Notifications (Speech & System) when a job finishes.
-- Persists settings and job list locally.
+- Persists settings and job list locally (Password stored securely in Keychain).
 - "Window" style menu bar app for easy interaction.
 
 ## Requirements
@@ -13,34 +13,33 @@ A macOS menu bar application to monitor Jenkins jobs, built with Swift and Swift
 - Xcode 14+ (for full development/archiving).
 
 ## How to Run (Development)
-You can run the app directly from the command line:
+You can run the app immediately using the included script, which builds and signs it for local use:
 ```bash
-swift run
+./create_bundle.sh
+open jenkins-tray.app
 ```
 
-## Usage
-1. Click the "Hammer" icon in the menu bar.
-2. Click the "Gear" icon to open settings.
-3. Enter your Jenkins URL (e.g., `https://jenkins.company.com`), Username, and Password/Token.
-4. Click "Save & Close".
-5. Paste a job path (e.g., `job/folder/job/name/123/`) in the text field and click "Add".
-6. The job will appear in the list and update automatically.
-
 ## App Store & Archiving
-To prepare this app for the App Store:
+To prepare this app for the App Store, you must create a full Xcode Project (since `Package.swift` alone does not support App Store signing features):
 
-1. **Generate Xcode Project**:
-   Open the `Package.swift` file in Xcode. Xcode will treat it as a project.
+1. **Create Xcode Project**:
+   - Open Xcode -> File -> New -> Project.
+   - Select **macOS** -> **App**.
+   - Name it `JenkinsTray`.
+   - Ensure Interface is **SwiftUI** and Language is **Swift**.
 
-2. **Configure Signing**:
-   - Click on the `jenkins-tray` target.
-   - Go to "Signing & Capabilities".
-   - Add your Team.
-   - Set a unique Bundle Identifier (e.g., `com.yourname.jenkins-tray`).
-   - Ensure "App Sandbox" is enabled if required (default for App Store).
-   - If Sandboxed, ensure "Outgoing Connections (Client)" is checked to allow network access.
+2. **Import Code**:
+   - Drag the Swift files from `Sources/jenkins-tray/` (`App.swift`, `JenkinsService.swift`, `Models.swift`, `Views.swift`) into your new Xcode project.
+   - Delete the default `ContentView.swift` and `JenkinsTrayApp.swift` created by Xcode, and use the ones you imported.
 
-3. **Archive**:
+3. **Configure Signing**:
+   - Click on the Project icon (top left).
+   - Select your **Target**.
+   - Go to the **Signing & Capabilities** tab.
+   - Add your Team and Bundle Identifier.
+   - **Important**: Click "+ Capability" and add **App Sandbox**.
+   - Under App Sandbox, check **Outgoing Connections (Client)** to allow Jenkins API access.
+
+4. **Archive**:
    - Select "Product" -> "Archive".
-   - Once archived, use the Organizer to "Distribute App" -> "App Store Connect".
-
+   - Use "Distribute App" -> "App Store Connect".
