@@ -1,77 +1,328 @@
 import Foundation
+import AppKit
 import Combine
+import UserNotifications
+import Security
 
-final class JenkinsService: ObservableObject {
-    // Settings
+class JenkinsService: ObservableObject {
+    @Published var jobs: [Job] = []
     @Published var url: String = ""
     @Published var username: String = ""
     @Published var password: String = ""
     
-    // Jobs
-    @Published private(set) var jobs: [Job] = []
-    
     var isConfigured: Bool {
-        // Basic check that settings are present
-        !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !url.isEmpty && !username.isEmpty && !password.isEmpty
     }
     
-    // MARK: - Public API
+    private var timer: Timer?
+    private let synthesizer = NSSpeechSynthesizer()
+    private let jobsKey = "saved_jenkins_jobs"
+    private let urlKey = "jenkins_url"
+    private let usernameKey = "jenkins_username"
+    
+    init() {
+        loadSettings()
+        loadJobs()
+        startMonitoring()
+    }
+    
+    func loadSettings() {
+        url = UserDefaults.standard.string(forKey: urlKey) ?? ""
+        username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
+        password = KeychainHelper.standard.read(service: "jenkins-tray", account: "jenkins_password") ?? ""
+    }
+    
+    func saveSettings() {
+        UserDefaults.standard.set(url, forKey: urlKey)
+        UserDefaults.standard.set(username, forKey: usernameKey)
+        
+        if !password.isEmpty {
+            KeychainHelper.standard.save(password, service: "jenkins-tray", account: "jenkins_password")
+        }
+        
+        // Trigger an immediate check when settings change
+        checkAllJobs()
+    }
+    
+    func loadJobs() {
+        if let data = UserDefaults.standard.data(forKey: jobsKey),
+           let decoded = try? JSONDecoder().decode([Job].self, from: data) {
+            jobs = decoded
+        }
+    }
+    
+    func saveJobs() {
+        if let encoded = try? JSONEncoder().encode(jobs) {
+            UserDefaults.standard.set(encoded, forKey: jobsKey)
+        }
+    }
+    
     func addJob(path: String) {
         var cleanedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Handle full URL input
-        if cleanedPath.lowercased().hasPrefix("http") {
-            if let url = URL(string: cleanedPath) {
-                let fullPath = url.path
-                cleanedPath = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
-            }
+        if let inputUrl = URL(string: cleanedPath), inputUrl.scheme != nil {
+            // User pasted a full URL.
+            // Ideally, we should check if it matches our configured base URL.
+            // For now, we just extract the path.
+            let fullPath = inputUrl.path
+            cleanedPath = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
         }
         
         cleanedPath = cleanedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         
         // Extract build ID (last component)
         let components = cleanedPath.split(separator: "/")
-        guard let last = components.last, Int(last) != nil else {
+        guard let last = components.last, let _ = Int(last) else {
+            // Invalid format
             return
         }
         
         let buildId = String(last)
-        let newJob = Job(path: cleanedPath, buildId: buildId, status: .unknown)
+        let newJob = Job(path: cleanedPath, buildId: buildId, status: .running) // Assume running initially
         
-        if !jobs.contains(where: { $0.path == cleanedPath }) {
-            jobs.append(newJob)
-            saveJobs()
-            checkJob(newJob)
+        DispatchQueue.main.async {
+            if !self.jobs.contains(where: { $0.path == cleanedPath }) {
+                self.jobs.append(newJob)
+                self.saveJobs()
+                self.checkJob(newJob) // Check immediately
+            }
         }
     }
     
     func removeJob(id: UUID) {
-        if let idx = jobs.firstIndex(where: { $0.id == id }) {
-            jobs.remove(at: idx)
-            saveJobs()
+        jobs.removeAll { $0.id == id }
+        saveJobs()
+    }
+    
+    func startMonitoring() {
+        // Check every 10 seconds
+        timer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+            self?.checkAllJobs()
         }
     }
     
-    func saveSettings() {
-        // Persist settings as needed. This is a stub to satisfy the UI.
-    }
-    
-    // MARK: - Private helpers
-    private func saveJobs() {
-        // Persist jobs array to storage if needed
-    }
-    
-    private func checkJob(_ job: Job) {
-        // Replace with real network call. For now, simulate an update to demonstrate flow.
-        // After some background work, update status on main thread.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self else { return }
-            if let idx = self.jobs.firstIndex(where: { $0.path == job.path }) {
-                // Randomly assign a status for placeholder logic
-                let statuses: [JobStatus] = [.running, .success, .failure, .aborted, .unknown]
-                self.jobs[idx].status = statuses.randomElement() ?? .unknown
-                self.jobs[idx].lastChecked = Date()
+    func checkAllJobs() {
+        guard isConfigured else { return }
+        for job in jobs {
+            // We continue checking even if it failed previously, to recover from network errors
+            if job.status != .success && job.status != .failure && job.status != .aborted {
+                checkJob(job)
             }
         }
+    }
+    
+    func checkJob(_ job: Job) {
+        guard !url.isEmpty else { return }
+        
+        // Construct URL
+        // Ensure base URL has no trailing slash
+        let baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Ensure path has no leading/trailing slash
+        let jobPath = job.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        
+        // Append /api/json
+        let fullUrlString = "\(baseUrl)/\(jobPath)/api/json"
+        
+        guard let apiURL = URL(string: fullUrlString) else {
+            print("Invalid URL: \(fullUrlString)")
+            updateJobStatus(job, status: .unknown)
+            return
+        }
+        
+        var request = URLRequest(url: apiURL)
+        request.timeoutInterval = 15 // Timeout after 15 seconds
+        
+        // Auth
+        if !username.isEmpty && !password.isEmpty {
+            let loginString = "\(username):\(password)"
+            if let loginData = loginString.data(using: .utf8) {
+                let base64LoginString = loginData.base64EncodedString()
+                request.setValue("Basic \(base64LoginString)", forHTTPHeaderField: "Authorization")
+            }
+        }
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            // Handle network error
+            if let error = error {
+                print("Network error for \(job.buildId): \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    self.updateJobStatus(job, status: .networkError)
+                }
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                     print("Auth Error for \(job.buildId)")
+                     DispatchQueue.main.async {
+                         self.updateJobStatus(job, status: .authError)
+                     }
+                     return
+                 }
+                 
+                 if httpResponse.statusCode == 404 {
+                     print("Job not found (404): \(fullUrlString)")
+                     DispatchQueue.main.async {
+                         self.updateJobStatus(job, status: .unknown) // Or a specific 'notFound' status
+                     }
+                     return
+                 }
+                 
+                 if httpResponse.statusCode != 200 {
+                     print("HTTP Error \(httpResponse.statusCode) for \(job.buildId)")
+                     DispatchQueue.main.async {
+                         self.updateJobStatus(job, status: .networkError)
+                     }
+                     return
+                 }
+            }
+            
+            guard let data = data else { return }
+            
+            do {
+                let jenkinsResp = try JSONDecoder().decode(JenkinsResponse.self, from: data)
+                
+                DispatchQueue.main.async {
+                    if let result = jenkinsResp.result {
+                        // Job finished
+                        let newStatus = JobStatus(rawValue: result) ?? .unknown
+                        self.updateJobStatus(job, status: newStatus)
+                    } else if let building = jenkinsResp.building, building {
+                        self.updateJobStatus(job, status: .running)
+                    } else {
+                        // Result is null and building is false (e.g. in queue or just started)
+                        self.updateJobStatus(job, status: .running)
+                    }
+                }
+            } catch {
+                print("Decoding error for \(job.buildId): \(error)")
+                // Try to print string to debug
+                if let str = String(data: data, encoding: .utf8) {
+                    print("Response: \(str)")
+                }
+                DispatchQueue.main.async {
+                    self.updateJobStatus(job, status: .unknown)
+                }
+            }
+        }.resume()
+    }
+    
+    func updateJobStatus(_ job: Job, status: JobStatus) {
+        if let index = self.jobs.firstIndex(where: { $0.id == job.id }) {
+            var updatedJob = self.jobs[index]
+            updatedJob.lastChecked = Date()
+            
+            // Only notify if status changed AND it's a completion status
+            if updatedJob.status != status {
+                updatedJob.status = status
+                
+                if status == .success || status == .failure || status == .aborted {
+                    self.notify(job: updatedJob)
+                }
+            }
+            
+            self.jobs[index] = updatedJob
+            self.saveJobs()
+        }
+    }
+    
+    func notify(job: Job) {
+        let text = "Job number \(job.buildId) done. Status: \(job.status.rawValue)"
+        synthesizer.startSpeaking(text)
+        
+        // Notification content matching the screenshot style
+        let title = "Jenkins Monitor"
+        let subtitle = "Job #\(job.buildId)"
+        let body = "Status: \(job.status.rawValue)"
+        
+        if Bundle.main.bundleIdentifier != nil {
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.subtitle = subtitle
+            content.body = body
+            content.sound = UNNotificationSound.default
+            
+            let request = UNNotificationRequest(identifier: job.id.uuidString, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+        } else {
+            // Fallback for CLI/Development mode using AppleScript
+            sendFallbackNotification(title: title, subtitle: subtitle, body: body)
+        }
+    }
+    
+    func sendFallbackNotification(title: String, subtitle: String, body: String) {
+        // AppleScript: display notification "message" with title "title" subtitle "subtitle"
+        // Sanitize inputs (basic)
+        let safeTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+        let safeSubtitle = subtitle.replacingOccurrences(of: "\"", with: "\\\"")
+        let safeBody = body.replacingOccurrences(of: "\"", with: "\\\"")
+        
+        let script = "display notification \"\(safeBody)\" with title \"\(safeTitle)\" subtitle \"\(safeSubtitle)\""
+        
+        let process = Process()
+        process.launchPath = "/usr/bin/osascript"
+        process.arguments = ["-e", script]
+        process.launch()
+    }
+}
+
+class KeychainHelper {
+    static let standard = KeychainHelper()
+    private init() {}
+    
+    func save(_ data: Data, service: String, account: String) {
+        let query = [
+            kSecValueData: data,
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+        ] as CFDictionary
+        
+        // Delete existing item
+        SecItemDelete(query)
+        
+        // Add new item
+        SecItemAdd(query, nil)
+    }
+    
+    func save(_ string: String, service: String, account: String) {
+        if let data = string.data(using: .utf8) {
+            save(data, service: service, account: account)
+        }
+    }
+    
+    func read(service: String, account: String) -> Data? {
+        let query = [
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecClass: kSecClassGenericPassword,
+            kSecReturnData: true
+        ] as CFDictionary
+        
+        var result: AnyObject?
+        SecItemCopyMatching(query, &result)
+        
+        return result as? Data
+    }
+    
+    func read(service: String, account: String) -> String? {
+        let data: Data? = read(service: service, account: account)
+        if let data = data {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
+    
+    func delete(service: String, account: String) {
+        let query = [
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecClass: kSecClassGenericPassword,
+        ] as CFDictionary
+        
+        SecItemDelete(query)
     }
 }
