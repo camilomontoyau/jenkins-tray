@@ -63,11 +63,7 @@ struct ContentView: View {
             // Job List
             List {
                 ForEach(service.jobs) { job in
-                    JobRow(job: job)
-                }
-                .onDelete { indexSet in
-                    indexSet.forEach { index in
-                        let job = service.jobs[index]
+                    JobRow(job: job) {
                         service.removeJob(id: job.id)
                     }
                 }
@@ -103,6 +99,7 @@ struct ContentView: View {
 
 struct JobRow: View {
     let job: Job
+    var onDelete: () -> Void
     
     var statusColor: Color {
         switch job.status {
@@ -149,6 +146,13 @@ struct JobRow: View {
                 ProgressView()
                     .scaleEffect(0.5)
             }
+            
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 4)
         }
         .padding(.vertical, 4)
     }
