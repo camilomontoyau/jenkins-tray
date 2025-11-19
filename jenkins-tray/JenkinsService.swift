@@ -1,17 +1,29 @@
+import Foundation
+import Combine
+
+final class JenkinsService: ObservableObject {
+    // Settings
+    @Published var url: String = ""
+    @Published var username: String = ""
+    @Published var password: String = ""
+    
+    // Jobs
+    @Published private(set) var jobs: [Job] = []
+    
+    var isConfigured: Bool {
+        // Basic check that settings are present
+        !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
+    // MARK: - Public API
     func addJob(path: String) {
         var cleanedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Handle full URL input
         if cleanedPath.lowercased().hasPrefix("http") {
             if let url = URL(string: cleanedPath) {
-                // url.path returns "/job/dev/..."
-                // We want "job/dev/..." (no leading slash)
                 let fullPath = url.path
-                if fullPath.hasPrefix("/") {
-                    cleanedPath = String(fullPath.dropFirst())
-                } else {
-                    cleanedPath = fullPath
-                }
+                cleanedPath = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
             }
         }
         
@@ -19,21 +31,47 @@
         
         // Extract build ID (last component)
         let components = cleanedPath.split(separator: "/")
-        guard let last = components.last, let _ = Int(last) else {
-            // If no build ID found, maybe assume it's a job path and user wants latest? 
-            // But requirement says "identify the job and its id".
-            // We'll assume the format includes the ID at the end.
+        guard let last = components.last, Int(last) != nil else {
             return
         }
         
         let buildId = String(last)
-        let newJob = Job(path: cleanedPath, buildId: buildId, status: .running) // Assume running initially
+        let newJob = Job(path: cleanedPath, buildId: buildId, status: .unknown)
         
-        DispatchQueue.main.async {
-            if !self.jobs.contains(where: { $0.path == cleanedPath }) {
-                self.jobs.append(newJob)
-                self.saveJobs()
-                self.checkJob(newJob) // Check immediately
+        if !jobs.contains(where: { $0.path == cleanedPath }) {
+            jobs.append(newJob)
+            saveJobs()
+            checkJob(newJob)
+        }
+    }
+    
+    func removeJob(id: UUID) {
+        if let idx = jobs.firstIndex(where: { $0.id == id }) {
+            jobs.remove(at: idx)
+            saveJobs()
+        }
+    }
+    
+    func saveSettings() {
+        // Persist settings as needed. This is a stub to satisfy the UI.
+    }
+    
+    // MARK: - Private helpers
+    private func saveJobs() {
+        // Persist jobs array to storage if needed
+    }
+    
+    private func checkJob(_ job: Job) {
+        // Replace with real network call. For now, simulate an update to demonstrate flow.
+        // After some background work, update status on main thread.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            if let idx = self.jobs.firstIndex(where: { $0.path == job.path }) {
+                // Randomly assign a status for placeholder logic
+                let statuses: [JobStatus] = [.running, .success, .failure, .aborted, .unknown]
+                self.jobs[idx].status = statuses.randomElement() ?? .unknown
+                self.jobs[idx].lastChecked = Date()
             }
         }
     }
+}

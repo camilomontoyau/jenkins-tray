@@ -1,5 +1,6 @@
 import SwiftUI
 import UserNotifications
+typealias AppJob = Job
 
 struct ContentView: View {
     @StateObject var service = JenkinsService()
@@ -98,7 +99,7 @@ struct ContentView: View {
 }
 
 struct JobRow: View {
-    let job: Job
+    let job: AppJob
     var onDelete: () -> Void
     
     var statusColor: Color {
