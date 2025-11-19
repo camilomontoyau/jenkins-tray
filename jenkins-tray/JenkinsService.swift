@@ -67,9 +67,9 @@ class JenkinsService: ObservableObject {
             // Extract the path and find the first "/job/" occurrence
             let fullPath = inputUrl.path
             if let jobRange = fullPath.range(of: "/job/") {
-                // Extract everything from the first "/job/" forward
+                // Extract everything from the first "/job/" forward (including "/job/")
                 cleanedPath = String(fullPath[jobRange.lowerBound...])
-                // Remove leading slash
+                // Remove leading slash to get "job/..."
                 cleanedPath = cleanedPath.hasPrefix("/") ? String(cleanedPath.dropFirst()) : cleanedPath
             } else {
                 // No "/job/" found, use the whole path
@@ -83,7 +83,9 @@ class JenkinsService: ObservableObject {
             }
         }
         
+        // Remove trailing slashes and normalize (remove any double slashes in the path)
         cleanedPath = cleanedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        cleanedPath = normalizePath(cleanedPath)
         
         // Extract build ID (last component)
         let components = cleanedPath.split(separator: "/")
@@ -129,13 +131,19 @@ class JenkinsService: ObservableObject {
     func checkJob(_ job: Job) {
         guard !url.isEmpty else { return }
         
-        // Construct URL
-        // Ensure base URL has no trailing slash
-        let baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        // Ensure path has no leading/trailing slash
-        let jobPath = job.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Construct URL ensuring no double slashes (except in protocol)
+        // Remove trailing slashes from base URL (but preserve protocol)
+        var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         
-        // Append /api/json
+        // If baseUrl doesn't start with http:// or https://, something is wrong
+        // But we'll let URL(string:) validate it
+        
+        // Normalize job path (remove leading/trailing slashes and double slashes)
+        var jobPath = job.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        jobPath = normalizePath(jobPath)
+        
+        // Construct the full URL: baseUrl + "/" + jobPath + "/api/json"
+        // This ensures exactly one slash between each component
         let fullUrlString = "\(baseUrl)/\(jobPath)/api/json"
         
         guard let apiURL = URL(string: fullUrlString) else {
@@ -269,6 +277,17 @@ class JenkinsService: ObservableObject {
             // Fallback for CLI/Development mode using AppleScript
             sendFallbackNotification(title: title, subtitle: subtitle, body: body)
         }
+    }
+    
+    // Helper function to remove double slashes from paths
+    // This only works on paths (not full URLs with protocols)
+    private func normalizePath(_ path: String) -> String {
+        var normalized = path
+        // Remove all double slashes (but preserve single slashes)
+        while normalized.contains("//") {
+            normalized = normalized.replacingOccurrences(of: "//", with: "/")
+        }
+        return normalized
     }
     
     func sendFallbackNotification(title: String, subtitle: String, body: String) {
