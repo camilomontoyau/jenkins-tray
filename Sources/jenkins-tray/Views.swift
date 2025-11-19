@@ -30,18 +30,33 @@ struct ContentView: View {
             Divider()
             
             // Add Job
-            HStack {
-                TextField("Paste job path here...", text: $newJobPath)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
+            if service.isConfigured {
+                HStack {
+                    TextField("Paste job path here...", text: $newJobPath)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            addJob()
+                        }
+                    
+                    Button("Add") {
                         addJob()
                     }
-                
-                Button("Add") {
-                    addJob()
                 }
+                .padding()
+            } else {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.yellow)
+                    Text("Please configure settings to add jobs")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Settings") {
+                        showSettings = true
+                    }
+                }
+                .padding()
             }
-            .padding()
             
             Divider()
             

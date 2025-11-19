@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import Combine
 import UserNotifications
+import Security
 
 class JenkinsService: ObservableObject {
     @Published var jobs: [Job] = []
@@ -9,12 +10,16 @@ class JenkinsService: ObservableObject {
     @Published var username: String = ""
     @Published var password: String = ""
     
+    var isConfigured: Bool {
+        return !url.isEmpty && !username.isEmpty && !password.isEmpty
+    }
+    
     private var timer: Timer?
     private let synthesizer = NSSpeechSynthesizer()
     private let jobsKey = "saved_jenkins_jobs"
     private let urlKey = "jenkins_url"
     private let usernameKey = "jenkins_username"
-    private let passwordKey = "jenkins_password" // In a real app, use Keychain
+    // passwordKey removed as we use Keychain
     
     init() {
         loadSettings()
@@ -25,13 +30,17 @@ class JenkinsService: ObservableObject {
     func loadSettings() {
         url = UserDefaults.standard.string(forKey: urlKey) ?? ""
         username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
-        password = UserDefaults.standard.string(forKey: passwordKey) ?? ""
+        password = KeychainHelper.standard.read(service: "jenkins-tray", account: "jenkins_password") ?? ""
     }
     
     func saveSettings() {
         UserDefaults.standard.set(url, forKey: urlKey)
         UserDefaults.standard.set(username, forKey: usernameKey)
-        UserDefaults.standard.set(password, forKey: passwordKey)
+        
+        if !password.isEmpty {
+            KeychainHelper.standard.save(password, service: "jenkins-tray", account: "jenkins_password")
+        }
+        
         // Restart monitoring if settings change might be good, but next tick will pick it up
     }
     
@@ -85,6 +94,7 @@ class JenkinsService: ObservableObject {
     }
     
     func checkAllJobs() {
+        guard isConfigured else { return } // Don't check if not configured
         for job in jobs {
             if job.status == .running || job.status == .unknown {
                 checkJob(job)
@@ -194,5 +204,63 @@ class JenkinsService: ObservableObject {
         process.launchPath = "/usr/bin/osascript"
         process.arguments = ["-e", script]
         process.launch()
+    }
+}
+
+class KeychainHelper {
+    static let standard = KeychainHelper()
+    private init() {}
+    
+    func save(_ data: Data, service: String, account: String) {
+        let query = [
+            kSecValueData: data,
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+        ] as CFDictionary
+        
+        // Delete existing item
+        SecItemDelete(query)
+        
+        // Add new item
+        SecItemAdd(query, nil)
+    }
+    
+    func save(_ string: String, service: String, account: String) {
+        if let data = string.data(using: .utf8) {
+            save(data, service: service, account: account)
+        }
+    }
+    
+    func read(service: String, account: String) -> Data? {
+        let query = [
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecClass: kSecClassGenericPassword,
+            kSecReturnData: true
+        ] as CFDictionary
+        
+        var result: AnyObject?
+        SecItemCopyMatching(query, &result)
+        
+        return result as? Data
+    }
+    
+    func read(service: String, account: String) -> String? {
+        let data: Data? = read(service: service, account: account)
+        if let data = data {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
+    
+    func delete(service: String, account: String) {
+        let query = [
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecClass: kSecClassGenericPassword,
+        ] as CFDictionary
+        
+        SecItemDelete(query)
     }
 }
