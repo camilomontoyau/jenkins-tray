@@ -5,15 +5,26 @@ SCHEME="jenkins-tray"
 APP_NAME="JenkinsTray"
 BUNDLE_ID="com.camilomontoyau.jenkins-tray"
 CONFIG="Release"
+DERIVED_DATA="build/DerivedData"
 
-xcodebuild -scheme "$SCHEME" -configuration "$CONFIG" build
+xcodebuild \
+  -scheme "$SCHEME" \
+  -configuration "$CONFIG" \
+  -derivedDataPath "$DERIVED_DATA" \
+  build >/tmp/create_bundle_build.log
 
 APP_DIR="build/$APP_NAME.app"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
-cp "build/$CONFIG/jenkins-tray" "$APP_DIR/Contents/MacOS/$APP_NAME"
+EXECUTABLE_PATH="$DERIVED_DATA/Build/Products/$CONFIG/jenkins-tray"
+if [[ ! -f "$EXECUTABLE_PATH" ]]; then
+  echo "Error: expected executable not found at $EXECUTABLE_PATH"
+  exit 1
+fi
+
+cp "$EXECUTABLE_PATH" "$APP_DIR/Contents/MacOS/$APP_NAME"
 
 cat > "$APP_DIR/Contents/Info.plist" <<EOF2
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,3 +54,4 @@ EOF2
 codesign --force --deep --sign - "$APP_DIR"
 
 echo "App bundle created at $APP_DIR"
+echo "Binary copied from $EXECUTABLE_PATH"
