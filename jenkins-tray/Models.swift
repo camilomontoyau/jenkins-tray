@@ -1,13 +1,13 @@
 import Foundation
 
 enum JobStatus: String, Codable {
-    case running
-    case success
-    case failure
-    case aborted
-    case authError
-    case networkError
-    case unknown
+    case running = "running"
+    case success = "SUCCESS"
+    case failure = "FAILURE"
+    case aborted = "ABORTED"
+    case authError = "AUTH_ERROR"
+    case networkError = "NETWORK_ERROR"
+    case unknown = "UNKNOWN"
 }
 
 struct Job: Identifiable, Codable, Hashable {
