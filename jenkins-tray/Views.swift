@@ -1,6 +1,6 @@
 import SwiftUI
 import UserNotifications
-typealias AppJob = Job
+import AppKit
 
 struct ContentView: View {
     @StateObject var service = JenkinsService()
@@ -64,7 +64,7 @@ struct ContentView: View {
             // Job List
             List {
                 ForEach(service.jobs) { job in
-                    JobRow(job: job) {
+                    JobRow(job: job, service: service) {
                         service.removeJob(id: job.id)
                     }
                 }
@@ -99,8 +99,11 @@ struct ContentView: View {
 }
 
 struct JobRow: View {
-    let job: AppJob
+    let job: Job
+    let service: JenkinsService
     var onDelete: () -> Void
+    
+    @State private var copied = false
     
     var statusColor: Color {
         switch job.status {
@@ -147,6 +150,22 @@ struct JobRow: View {
                 ProgressView()
                     .scaleEffect(0.5)
             }
+            
+            Button(action: {
+                let apiUrl = service.getApiUrl(for: job)
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(apiUrl, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    copied = false
+                }
+            }) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .foregroundColor(copied ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 4)
             
             Button(action: onDelete) {
                 Image(systemName: "trash")

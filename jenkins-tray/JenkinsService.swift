@@ -63,20 +63,32 @@ class JenkinsService: ObservableObject {
         
         // Handle full URL input
         if let inputUrl = URL(string: cleanedPath), inputUrl.scheme != nil {
-            // User pasted a full URL.
-            // Extract the path and find the first "/job/" occurrence
-            let fullPath = inputUrl.path
+            // User pasted a full URL (e.g., https://jenkins.com/me/my-views/view/all/job/dev/job/build/123/api/json)
+            // Extract the path component
+            var fullPath = inputUrl.path
+            
+            // Remove /api/json if present (user might paste the full API URL)
+            if fullPath.hasSuffix("/api/json") {
+                fullPath = String(fullPath.dropLast(9)) // Remove "/api/json"
+            }
+            
+            // Find the first "/job/" occurrence and extract everything from there
             if let jobRange = fullPath.range(of: "/job/") {
-                // Extract everything from the first "/job/" forward (including "/job/")
+                // Extract everything from the first "/job/" forward
                 cleanedPath = String(fullPath[jobRange.lowerBound...])
                 // Remove leading slash to get "job/..."
                 cleanedPath = cleanedPath.hasPrefix("/") ? String(cleanedPath.dropFirst()) : cleanedPath
             } else {
-                // No "/job/" found, use the whole path
+                // No "/job/" found, use the whole path (minus /api/json if it was there)
                 cleanedPath = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
             }
         } else {
             // Not a full URL, but check if it contains "/job/" and extract from there
+            // Also remove /api/json if present
+            if cleanedPath.hasSuffix("/api/json") {
+                cleanedPath = String(cleanedPath.dropLast(9))
+            }
+            
             if let jobRange = cleanedPath.range(of: "/job/") {
                 cleanedPath = String(cleanedPath[jobRange.lowerBound...])
                 cleanedPath = cleanedPath.hasPrefix("/") ? String(cleanedPath.dropFirst()) : cleanedPath
@@ -87,14 +99,15 @@ class JenkinsService: ObservableObject {
         cleanedPath = cleanedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         cleanedPath = normalizePath(cleanedPath)
         
-        // Extract build ID (last component)
+        // Extract build ID (last component) - must be a number
         let components = cleanedPath.split(separator: "/")
-        guard let last = components.last, let _ = Int(last) else {
-            // Invalid format
+        guard let last = components.last, let buildIdInt = Int(last) else {
+            // Invalid format - no build ID found
+            print("Error: Could not extract build ID from path: \(cleanedPath)")
             return
         }
         
-        let buildId = String(last)
+        let buildId = String(buildIdInt)
         let newJob = Job(path: cleanedPath, buildId: buildId, status: .running) // Assume running initially
         
         DispatchQueue.main.async {
@@ -128,15 +141,12 @@ class JenkinsService: ObservableObject {
         }
     }
     
-    func checkJob(_ job: Job) {
-        guard !url.isEmpty else { return }
+    func getApiUrl(for job: Job) -> String {
+        guard !url.isEmpty else { return "" }
         
         // Construct URL ensuring no double slashes (except in protocol)
         // Remove trailing slashes from base URL (but preserve protocol)
         var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        
-        // If baseUrl doesn't start with http:// or https://, something is wrong
-        // But we'll let URL(string:) validate it
         
         // Normalize job path (remove leading/trailing slashes and double slashes)
         var jobPath = job.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -144,7 +154,13 @@ class JenkinsService: ObservableObject {
         
         // Construct the full URL: baseUrl + "/" + jobPath + "/api/json"
         // This ensures exactly one slash between each component
-        let fullUrlString = "\(baseUrl)/\(jobPath)/api/json"
+        return "\(baseUrl)/\(jobPath)/api/json"
+    }
+    
+    func checkJob(_ job: Job) {
+        guard !url.isEmpty else { return }
+        
+        let fullUrlString = getApiUrl(for: job)
         
         guard let apiURL = URL(string: fullUrlString) else {
             print("Invalid URL: \(fullUrlString)")
