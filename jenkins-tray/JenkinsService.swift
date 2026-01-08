@@ -58,8 +58,9 @@ class JenkinsService: ObservableObject {
         }
     }
     
-    func addJob(path: String) {
-        var cleanedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Helper method to extract path from various inputs
+    func extractJobPath(from input: String) -> String {
+        var cleanedPath = input.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Handle full URL input
         if let inputUrl = URL(string: cleanedPath), inputUrl.scheme != nil {
@@ -98,6 +99,12 @@ class JenkinsService: ObservableObject {
         // Remove trailing slashes and normalize (remove any double slashes in the path)
         cleanedPath = cleanedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         cleanedPath = normalizePath(cleanedPath)
+        
+        return cleanedPath
+    }
+
+    func addJob(path: String) {
+        var cleanedPath = extractJobPath(from: path)
         
         // Extract build ID (last component) - must be a number
         let components = cleanedPath.split(separator: "/")
@@ -353,8 +360,9 @@ class JenkinsService: ObservableObject {
         // Base URL + Path + /build OR /buildWithParameters
         
         var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        var jobPath = config.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        jobPath = normalizePath(jobPath)
+        
+        // Use the helper to extract a clean path from potentially full URL inputs
+        var jobPath = extractJobPath(from: config.url)
         
         let endpoint = config.params.isEmpty ? "build" : "buildWithParameters"
         let buildUrlString = "\(baseUrl)/\(jobPath)/\(endpoint)"
