@@ -6,7 +6,7 @@ CONFIG="Release"
 DERIVED_DATA="build/DerivedData"
 SOURCE_APP="$DERIVED_DATA/Build/Products/$CONFIG/jenkins-tray.app"
 DEST_DIR="build"
-DEST_APP="$DEST_DIR/jenkins-try.app"
+DEST_APP="$DEST_DIR/jenkins-tray.app"
 
 xcodebuild \
   -scheme "$SCHEME" \
