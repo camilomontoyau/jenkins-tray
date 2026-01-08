@@ -181,16 +181,13 @@ struct JobRow: View {
             
             // Future Run Config Button
             Button(action: {
-                showFutureConfig = true
+                openConfigWindow()
             }) {
                 Image(systemName: "clock.arrow.circlepath")
                     .foregroundColor(job.futureJob != nil ? .blue : .secondary)
             }
             .buttonStyle(.plain)
             .padding(.leading, 4)
-            .popover(isPresented: $showFutureConfig) {
-                FutureJobConfigView(job: job, service: service, isPresented: $showFutureConfig)
-            }
             
             Button(action: onDelete) {
                 Image(systemName: "trash")
@@ -200,6 +197,27 @@ struct JobRow: View {
             .padding(.leading, 4)
         }
         .padding(.vertical, 4)
+    }
+    
+    func openConfigWindow() {
+        // Create a new window for configuration
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered, defer: false)
+        window.center()
+        window.title = "Future Run Configuration - \(job.displayName)"
+        window.isReleasedWhenClosed = false // Keep window alive? No, we want it released but SwiftUI might handle it.
+        // Actually, for simple window:
+        
+        let view = FutureJobConfigView(job: job, service: service, isPresented: Binding(
+            get: { true },
+            set: { if !$0 { window.close() } }
+        ))
+        
+        window.contentView = NSHostingView(rootView: view)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -227,17 +245,21 @@ struct FutureJobConfigView: View {
                 .font(.subheadline)
                 .padding(.top, 5)
             
-            ForEach($params) { $param in
-                HStack {
-                    TextField("Key", text: $param.key)
-                    TextField("Value", text: $param.value)
-                    Button(action: {
-                        params.removeAll { $0.id == param.id }
-                    }) {
-                        Image(systemName: "minus.circle.fill")
-                            .foregroundColor(.red)
+            ScrollView {
+                VStack {
+                    ForEach($params) { $param in
+                        HStack {
+                            TextField("Key", text: $param.key)
+                            TextField("Value", text: $param.value)
+                            Button(action: {
+                                params.removeAll { $0.id == param.id }
+                            }) {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
             
@@ -264,7 +286,7 @@ struct FutureJobConfigView: View {
             .padding(.top, 10)
         }
         .padding()
-        .frame(width: 400)
+        .frame(minWidth: 400, minHeight: 300)
         .onAppear {
             if let config = job.futureJob {
                 futureUrl = config.url
