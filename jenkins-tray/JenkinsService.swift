@@ -112,7 +112,7 @@ class JenkinsService: ObservableObject {
         
         DispatchQueue.main.async {
             if !self.jobs.contains(where: { $0.path == cleanedPath }) {
-                self.jobs.append(newJob)
+                self.jobs.insert(newJob, at: 0)
                 self.saveJobs()
                 self.checkJob(newJob) // Check immediately
             }
@@ -155,6 +155,17 @@ class JenkinsService: ObservableObject {
         // Construct the full URL: baseUrl + "/" + jobPath + "/api/json"
         // This ensures exactly one slash between each component
         return "\(baseUrl)/\(jobPath)/api/json"
+    }
+
+    func getJobWebUrl(for job: Job) -> URL? {
+        guard !url.isEmpty else { return nil }
+        
+        var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var jobPath = job.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        jobPath = normalizePath(jobPath)
+        
+        let urlString = "\(baseUrl)/\(jobPath)"
+        return URL(string: urlString)
     }
     
     func checkJob(_ job: Job) {

@@ -167,6 +167,17 @@ struct JobRow: View {
             .buttonStyle(.plain)
             .padding(.leading, 4)
             
+            Button(action: {
+                if let url = service.getJobWebUrl(for: job) {
+                    NSWorkspace.shared.open(url)
+                }
+            }) {
+                Image(systemName: "link")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 4)
+            
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .foregroundColor(.secondary)
