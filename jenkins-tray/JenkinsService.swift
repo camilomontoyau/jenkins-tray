@@ -124,6 +124,13 @@ class JenkinsService: ObservableObject {
         saveJobs()
     }
     
+    func updateJob(_ job: Job) {
+        if let index = jobs.firstIndex(where: { $0.id == job.id }) {
+            jobs[index] = job
+            saveJobs()
+        }
+    }
+    
     func startMonitoring() {
         // Check every 10 seconds
         timer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
@@ -271,6 +278,10 @@ class JenkinsService: ObservableObject {
                 if status == .success || status == .failure || status == .aborted {
                     self.notify(job: updatedJob)
                 }
+                
+                if status == .success, let futureJob = updatedJob.futureJob {
+                    self.triggerFutureJob(config: futureJob, parent: updatedJob)
+                }
             }
             
             self.jobs[index] = updatedJob
@@ -330,6 +341,131 @@ class JenkinsService: ObservableObject {
         process.launchPath = "/usr/bin/osascript"
         process.arguments = ["-e", script]
         process.launch()
+    }
+    
+    // MARK: - Future Job Triggering
+    
+    func triggerFutureJob(config: FutureJobConfig, parent: Job) {
+        guard !url.isEmpty, !config.url.isEmpty else { return }
+        
+        // Construct build URL
+        // config.url is expected to be the path like "job/my-job"
+        // Base URL + Path + /build OR /buildWithParameters
+        
+        var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var jobPath = config.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        jobPath = normalizePath(jobPath)
+        
+        let endpoint = config.params.isEmpty ? "build" : "buildWithParameters"
+        let buildUrlString = "\(baseUrl)/\(jobPath)/\(endpoint)"
+        
+        guard var components = URLComponents(string: buildUrlString) else {
+            print("Invalid URL for future job: \(buildUrlString)")
+            return
+        }
+        
+        // Add Query Params
+        if !config.params.isEmpty {
+            components.queryItems = config.params.map { URLQueryItem(name: $0.key, value: $0.value) }
+        }
+        
+        guard let apiURL = components.url else { return }
+        
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        
+        // Auth
+        if !username.isEmpty && !password.isEmpty {
+            let loginString = "\(username):\(password)"
+            if let loginData = loginString.data(using: .utf8) {
+                let base64LoginString = loginData.base64EncodedString()
+                request.setValue("Basic \(base64LoginString)", forHTTPHeaderField: "Authorization")
+            }
+        }
+        
+        // For some Jenkins versions, crumb issuer might be needed, but assuming basic auth or token is enough for now.
+        // Or if CSRF is enabled, we might need a crumb.
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("Error triggering future job: \(error.localizedDescription)")
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 201, let location = httpResponse.allHeaderFields["Location"] as? String {
+                    // Location header points to queue item
+                    print("Future job triggered. Queue Item: \(location)")
+                    self.monitorQueueItem(url: location)
+                } else {
+                    print("Failed to trigger future job. Status: \(httpResponse.statusCode)")
+                }
+            }
+        }.resume()
+    }
+    
+    func monitorQueueItem(url: String) {
+        // Poll the queue item until we get an executable URL
+        guard let queueUrl = URL(string: url + "api/json") else { return }
+        
+        var request = URLRequest(url: queueUrl)
+        if !username.isEmpty && !password.isEmpty {
+            let loginString = "\(username):\(password)"
+            if let loginData = loginString.data(using: .utf8) {
+                let base64LoginString = loginData.base64EncodedString()
+                request.setValue("Basic \(base64LoginString)", forHTTPHeaderField: "Authorization")
+            }
+        }
+        
+        // We need a delayed recursive call or a separate timer. 
+        // A simple recursive dispatch after delay is easiest for this one-off task.
+        
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                guard let self = self else { return }
+                
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    
+                    if let executable = json["executable"] as? [String: Any],
+                       let number = executable["number"] as? Int,
+                       let buildUrl = executable["url"] as? String {
+                        
+                        // We found the build!
+                        print("Queue item executed. Build #\(number) at \(buildUrl)")
+                        
+                        // Extract path from buildUrl to add to our list
+                        // The buildUrl includes the protocol and host, we need to extract the job path
+                        // E.g. http://jenkins/job/folder/job/myjob/123/
+                        
+                        if let buildUrlObj = URL(string: buildUrl) {
+                            var path = buildUrlObj.path
+                            // Remove /job/ prefix logic similar to addJob
+                            // But cleaner: just use the configured path + build ID
+                            // We know the configured path from the future job config, but we don't have it here easily
+                            // unless we pass it through. 
+                            // Easier: Extract from URL
+                             if path.hasPrefix("/") { path = String(path.dropFirst()) }
+                             // Remove trailing slash
+                             if path.hasSuffix("/") { path = String(path.dropLast()) }
+                             
+                             self.addJob(path: path)
+                        }
+                        
+                    } else {
+                        // Still in queue or logic differs, keep polling
+                        // Add a limit to avoid infinite loops? 
+                        // For now just keep polling every 5 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                            self.monitorQueueItem(url: url)
+                        }
+                    }
+                }
+            }.resume()
+        }
     }
 }
 

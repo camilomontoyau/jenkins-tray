@@ -16,12 +16,30 @@ struct Job: Identifiable, Codable, Hashable {
     var buildId: String
     var status: JobStatus = .unknown
     var lastChecked: Date = Date()
+    var futureJob: FutureJobConfig?
     
     var displayName: String {
         let parts = path.split(separator: "/")
         let names = parts.filter { $0 != "job" && Int($0) == nil }
         return names.joined(separator: " / ")
     }
+}
+
+struct JobParam: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var key: String = ""
+    var value: String = ""
+}
+
+struct FutureJobConfig: Codable, Hashable {
+    var url: String = ""
+    var params: [JobParam] = []
+}
+
+extension Job {
+    // Add mutating method to update future job config if needed, 
+    // but since Job is a struct we likely just modify the property.
+    // However, we need to add the property first.
 }
 
 struct JenkinsResponse: Codable {

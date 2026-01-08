@@ -104,6 +104,7 @@ struct JobRow: View {
     var onDelete: () -> Void
     
     @State private var copied = false
+    @State private var showFutureConfig = false
     
     var statusColor: Color {
         switch job.status {
@@ -178,6 +179,19 @@ struct JobRow: View {
             .buttonStyle(.plain)
             .padding(.leading, 4)
             
+            // Future Run Config Button
+            Button(action: {
+                showFutureConfig = true
+            }) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundColor(job.futureJob != nil ? .blue : .secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 4)
+            .popover(isPresented: $showFutureConfig) {
+                FutureJobConfigView(job: job, service: service, isPresented: $showFutureConfig)
+            }
+            
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .foregroundColor(.secondary)
@@ -186,6 +200,92 @@ struct JobRow: View {
             .padding(.leading, 4)
         }
         .padding(.vertical, 4)
+    }
+}
+
+struct FutureJobConfigView: View {
+    var job: Job
+    @ObservedObject var service: JenkinsService
+    @Binding var isPresented: Bool
+    
+    @State private var futureUrl: String = ""
+    @State private var params: [JobParam] = []
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Future Run Configuration")
+                .font(.headline)
+            
+            Text("Trigger this job when parent finishes successfully:")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            TextField("Job Path (e.g. job/my-project)", text: $futureUrl)
+                .textFieldStyle(.roundedBorder)
+            
+            Text("Parameters")
+                .font(.subheadline)
+                .padding(.top, 5)
+            
+            ForEach($params) { $param in
+                HStack {
+                    TextField("Key", text: $param.key)
+                    TextField("Value", text: $param.value)
+                    Button(action: {
+                        params.removeAll { $0.id == param.id }
+                    }) {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundColor(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            
+            Button(action: {
+                params.append(JobParam())
+            }) {
+                HStack {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add Parameter")
+                }
+            }
+            .buttonStyle(.plain)
+            
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                }
+                Spacer()
+                Button("Save") {
+                    saveConfig()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 10)
+        }
+        .padding()
+        .frame(width: 400)
+        .onAppear {
+            if let config = job.futureJob {
+                futureUrl = config.url
+                params = config.params
+            }
+        }
+    }
+    
+    func saveConfig() {
+        var updatedJob = job
+        // Filter out empty params
+        let validParams = params.filter { !$0.key.isEmpty }
+        
+        if futureUrl.isEmpty {
+             updatedJob.futureJob = nil
+        } else {
+            updatedJob.futureJob = FutureJobConfig(url: futureUrl, params: validParams)
+        }
+        
+        service.updateJob(updatedJob)
+        isPresented = false
     }
 }
 
