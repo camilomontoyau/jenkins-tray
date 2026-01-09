@@ -212,6 +212,7 @@ struct JobRow: View {
             }
             .buttonStyle(.plain)
             .padding(.leading, 4)
+            .help(job.path) // Show full path on hover
         }
         .padding(.vertical, 4)
     }

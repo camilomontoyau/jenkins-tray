@@ -59,7 +59,18 @@ class JenkinsService: ObservableObject {
     func loadJobs() {
         if let data = UserDefaults.standard.data(forKey: jobsKey),
            let decoded = try? JSONDecoder().decode([Job].self, from: data) {
-            jobs = decoded
+            
+            // Deduplicate based on path
+            var uniqueJobs = [Job]()
+            var seenPaths = Set<String>()
+            
+            for job in decoded {
+                if !seenPaths.contains(job.path) {
+                    uniqueJobs.append(job)
+                    seenPaths.insert(job.path)
+                }
+            }
+            jobs = uniqueJobs
         }
     }
     
