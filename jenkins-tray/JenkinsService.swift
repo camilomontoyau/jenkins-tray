@@ -10,6 +10,7 @@ class JenkinsService: ObservableObject {
     @Published var url: String = ""
     @Published var username: String = ""
     @Published var password: String = ""
+    @Published var futureJobDelay: Int = 2 // Default delay in minutes
     
     var isConfigured: Bool {
         return !url.isEmpty && !username.isEmpty && !password.isEmpty
@@ -20,6 +21,7 @@ class JenkinsService: ObservableObject {
     private let jobsKey = "saved_jenkins_jobs"
     private let urlKey = "jenkins_url"
     private let usernameKey = "jenkins_username"
+    private let delayKey = "jenkins_future_delay"
     
     init() {
         loadSettings()
@@ -31,11 +33,20 @@ class JenkinsService: ObservableObject {
         url = UserDefaults.standard.string(forKey: urlKey) ?? ""
         username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
         password = KeychainHelper.standard.read(service: "jenkins-tray", account: "jenkins_password") ?? ""
+        
+        // Load delay, default to 2 if not set (or set to 0 explicitly by user, though "integer(forKey:)" returns 0 if missing)
+        // To distinguish between missing (default 2) and 0, we can check object.
+        if UserDefaults.standard.object(forKey: delayKey) != nil {
+            futureJobDelay = UserDefaults.standard.integer(forKey: delayKey)
+        } else {
+            futureJobDelay = 2
+        }
     }
     
     func saveSettings() {
         UserDefaults.standard.set(url, forKey: urlKey)
         UserDefaults.standard.set(username, forKey: usernameKey)
+        UserDefaults.standard.set(futureJobDelay, forKey: delayKey)
         
         if !password.isEmpty {
             KeychainHelper.standard.save(password, service: "jenkins-tray", account: "jenkins_password")
@@ -287,7 +298,15 @@ class JenkinsService: ObservableObject {
                 }
                 
                 if status == .success, let futureJob = updatedJob.futureJob {
-                    self.triggerFutureJob(config: futureJob, parent: updatedJob)
+                    let delaySeconds = Double(futureJobDelay * 60)
+                    print("Scheduling future job trigger in \(futureJobDelay) minutes (\(delaySeconds) seconds)")
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
+                        // Re-verify the job exists and hasn't been removed or changed status? 
+                        // Actually, just fire it. 
+                        // But we might want to ensure 'self' still exists.
+                        self?.triggerFutureJob(config: futureJob, parent: updatedJob)
+                    }
                 }
             }
             

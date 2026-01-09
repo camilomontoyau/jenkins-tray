@@ -188,6 +188,23 @@ struct JobRow: View {
             }
             .buttonStyle(.plain)
             .padding(.leading, 4)
+            .help("Configure Future Run")
+            
+            // Trigger Future Job Immediately Button
+            Button(action: {
+                if let futureJob = job.futureJob {
+                    service.triggerFutureJob(config: futureJob, parent: job)
+                }
+            }) {
+                Image(systemName: "bolt.fill")
+                    .foregroundColor(
+                        (job.status == .success && job.futureJob != nil) ? .yellow : .gray.opacity(0.3)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 4)
+            .disabled(job.status != .success || job.futureJob == nil)
+            .help("Trigger Future Job Now")
             
             Button(action: onDelete) {
                 Image(systemName: "trash")
@@ -327,6 +344,15 @@ struct SettingsView: View {
             
             SecureField("Password / Token", text: $service.password)
                 .textFieldStyle(.roundedBorder)
+            
+            HStack {
+                Text("Future Job Delay (min):")
+                TextField("Minutes", value: $service.futureJobDelay, formatter: NumberFormatter())
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                Stepper("", value: $service.futureJobDelay, in: 0...60)
+            }
+            .padding(.top, 5)
             
             Button("Save & Close") {
                 service.saveSettings()
