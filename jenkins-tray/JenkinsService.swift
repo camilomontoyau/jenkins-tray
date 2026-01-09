@@ -407,7 +407,7 @@ class JenkinsService: ObservableObject {
                 if httpResponse.statusCode == 201, let location = httpResponse.allHeaderFields["Location"] as? String {
                     // Location header points to queue item
                     print("Future job triggered. Queue Item: \(location)")
-                    self.monitorQueueItem(url: location)
+                    self.monitorQueueItem(url: location, jobPath: jobPath)
                 } else {
                     print("Failed to trigger future job. Status: \(httpResponse.statusCode)")
                 }
@@ -415,7 +415,7 @@ class JenkinsService: ObservableObject {
         }.resume()
     }
     
-    func monitorQueueItem(url: String) {
+    func monitorQueueItem(url: String, jobPath: String) {
         // Poll the queue item until we get an executable URL
         guard let queueUrl = URL(string: url + "api/json") else { return }
         
@@ -439,36 +439,21 @@ class JenkinsService: ObservableObject {
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     
                     if let executable = json["executable"] as? [String: Any],
-                       let number = executable["number"] as? Int,
-                       let buildUrl = executable["url"] as? String {
+                       let number = executable["number"] as? Int {
                         
                         // We found the build!
-                        print("Queue item executed. Build #\(number) at \(buildUrl)")
+                        print("Queue item executed. Build #\(number)")
                         
-                        // Extract path from buildUrl to add to our list
-                        // The buildUrl includes the protocol and host, we need to extract the job path
-                        // E.g. http://jenkins/job/folder/job/myjob/123/
-                        
-                        if let buildUrlObj = URL(string: buildUrl) {
-                            var path = buildUrlObj.path
-                            // Remove /job/ prefix logic similar to addJob
-                            // But cleaner: just use the configured path + build ID
-                            // We know the configured path from the future job config, but we don't have it here easily
-                            // unless we pass it through. 
-                            // Easier: Extract from URL
-                             if path.hasPrefix("/") { path = String(path.dropFirst()) }
-                             // Remove trailing slash
-                             if path.hasSuffix("/") { path = String(path.dropLast()) }
-                             
-                             self.addJob(path: path)
-                        }
+                        // Instead of relying on executable["url"], construct path from jobPath and number
+                        let newJobPath = "\(jobPath)/\(number)"
+                        self.addJob(path: newJobPath)
                         
                     } else {
                         // Still in queue or logic differs, keep polling
                         // Add a limit to avoid infinite loops? 
                         // For now just keep polling every 5 seconds
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                            self.monitorQueueItem(url: url)
+                            self.monitorQueueItem(url: url, jobPath: jobPath)
                         }
                     }
                 }
