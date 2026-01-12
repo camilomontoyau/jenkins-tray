@@ -11,6 +11,7 @@ class JenkinsService: ObservableObject {
     @Published var username: String = ""
     @Published var password: String = ""
     @Published var futureJobDelay: Int = 2 // Default delay in minutes
+    @Published var savedConfigs: [FutureJobConfig] = []
     
     var isConfigured: Bool {
         return !url.isEmpty && !username.isEmpty && !password.isEmpty
@@ -22,6 +23,7 @@ class JenkinsService: ObservableObject {
     private let urlKey = "jenkins_url"
     private let usernameKey = "jenkins_username"
     private let delayKey = "jenkins_future_delay"
+    private let configsKey = "saved_future_configs"
     
     init() {
         loadSettings()

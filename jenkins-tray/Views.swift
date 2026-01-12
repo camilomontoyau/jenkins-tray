@@ -3,7 +3,7 @@ import UserNotifications
 import AppKit
 
 struct ContentView: View {
-    @StateObject var service = JenkinsService()
+    @ObservedObject var service: JenkinsService
     @State private var newJobPath: String = ""
     @State private var showSettings = false
     
@@ -220,7 +220,7 @@ struct JobRow: View {
     func openConfigWindow() {
         // Create a new window for configuration
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false)
         window.center()
@@ -323,7 +323,7 @@ struct FutureJobConfigView: View {
             .padding(.top, 10)
         }
         .padding()
-        .frame(minWidth: 400, minHeight: 300)
+        .frame(minWidth: 800, minHeight: 600)
         .onAppear {
             if let config = job.futureJob {
                 futureUrl = config.url
