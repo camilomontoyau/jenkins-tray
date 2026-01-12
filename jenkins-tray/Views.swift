@@ -246,6 +246,7 @@ struct FutureJobConfigView: View {
     
     @State private var futureUrl: String = ""
     @State private var params: [JobParam] = []
+    @State private var selectedConfig: FutureJobConfig?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -255,6 +256,24 @@ struct FutureJobConfigView: View {
             Text("Trigger this job when parent finishes successfully:")
                 .font(.caption)
                 .foregroundColor(.secondary)
+            
+            if !service.savedConfigs.isEmpty {
+                HStack {
+                    Text("Saved Configs:")
+                    Picker("", selection: $selectedConfig) {
+                        Text("Select a preset...").tag(nil as FutureJobConfig?)
+                        ForEach(service.savedConfigs, id: \.self) { config in
+                            Text(config.url).tag(config as FutureJobConfig?)
+                        }
+                    }
+                    .onChange(of: selectedConfig) { newValue in
+                        if let config = newValue {
+                            futureUrl = config.url
+                            params = config.params
+                        }
+                    }
+                }
+            }
             
             TextField("Job Path (e.g. job/my-project)", text: $futureUrl)
                 .textFieldStyle(.roundedBorder)
@@ -317,11 +336,14 @@ struct FutureJobConfigView: View {
         var updatedJob = job
         // Filter out empty params
         let validParams = params.filter { !$0.key.isEmpty }
+        let newConfig = FutureJobConfig(url: futureUrl, params: validParams)
         
         if futureUrl.isEmpty {
              updatedJob.futureJob = nil
         } else {
-            updatedJob.futureJob = FutureJobConfig(url: futureUrl, params: validParams)
+            updatedJob.futureJob = newConfig
+            // Save to history
+            service.saveFutureConfig(newConfig)
         }
         
         service.updateJob(updatedJob)

@@ -41,6 +41,12 @@ class JenkinsService: ObservableObject {
         } else {
             futureJobDelay = 2
         }
+        
+        // Load saved configs
+        if let data = UserDefaults.standard.data(forKey: configsKey),
+           let decoded = try? JSONDecoder().decode([FutureJobConfig].self, from: data) {
+            savedConfigs = decoded
+        }
     }
     
     func saveSettings() {
@@ -48,12 +54,24 @@ class JenkinsService: ObservableObject {
         UserDefaults.standard.set(username, forKey: usernameKey)
         UserDefaults.standard.set(futureJobDelay, forKey: delayKey)
         
+        if let encoded = try? JSONEncoder().encode(savedConfigs) {
+            UserDefaults.standard.set(encoded, forKey: configsKey)
+        }
+        
         if !password.isEmpty {
             KeychainHelper.standard.save(password, service: "jenkins-tray", account: "jenkins_password")
         }
         
         // Trigger an immediate check when settings change
         checkAllJobs()
+    }
+    
+    func saveFutureConfig(_ config: FutureJobConfig) {
+        // Remove existing config with same URL if it exists
+        savedConfigs.removeAll { $0.url == config.url }
+        // Add new one
+        savedConfigs.append(config)
+        saveSettings()
     }
     
     func loadJobs() {
