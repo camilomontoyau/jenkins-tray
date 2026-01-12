@@ -1,6 +1,7 @@
 import SwiftUI
 import UserNotifications
 import AppKit
+import Combine
 
 struct ContentView: View {
     @ObservedObject var service: JenkinsService
@@ -84,7 +85,6 @@ struct ContentView: View {
         }
         .frame(width: 350)
         .onAppear {
-            // Request notification permission only if running as a bundle
             if Bundle.main.bundleIdentifier != nil {
                 UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
             }
@@ -218,15 +218,13 @@ struct JobRow: View {
     }
     
     func openConfigWindow() {
-        // Create a new window for configuration
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false)
         window.center()
         window.title = "Future Run Configuration - \(job.displayName)"
-        window.isReleasedWhenClosed = false // Keep window alive? No, we want it released but SwiftUI might handle it.
-        // Actually, for simple window:
+        window.isReleasedWhenClosed = false
         
         let view = FutureJobConfigView(job: job, service: service, isPresented: Binding(
             get: { true },
@@ -239,14 +237,69 @@ struct JobRow: View {
     }
 }
 
+enum ConfigFocusField: Hashable {
+    case url
+    case key(UUID)
+    case value(UUID)
+}
+
+class FutureJobConfigViewModel: ObservableObject {
+    @Published var futureUrl: String = ""
+    @Published var params: [JobParam] = []
+    @Published var selectedConfig: FutureJobConfig?
+    
+    @Published var currentFocus: ConfigFocusField?
+    @Published var requestedFocus: ConfigFocusField?
+    
+    var monitor: Any?
+    
+    func setup(job: Job) {
+        if let config = job.futureJob {
+            self.futureUrl = config.url
+            self.params = config.params
+        }
+        
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            if event.keyCode == 48 { // Tab
+                if let focus = self.currentFocus,
+                   case .value(let id) = focus,
+                   id == self.params.last?.id {
+                    
+                    DispatchQueue.main.async {
+                        self.addParam()
+                    }
+                    return nil
+                }
+            }
+            return event
+        }
+    }
+    
+    func addParam() {
+        let newParam = JobParam()
+        params.append(newParam)
+        // Schedule focus update
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.requestedFocus = .key(newParam.id)
+        }
+    }
+    
+    func cleanup() {
+        if let monitor = monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+}
+
 struct FutureJobConfigView: View {
     var job: Job
     @ObservedObject var service: JenkinsService
     @Binding var isPresented: Bool
     
-    @State private var futureUrl: String = ""
-    @State private var params: [JobParam] = []
-    @State private var selectedConfig: FutureJobConfig?
+    @StateObject private var viewModel = FutureJobConfigViewModel()
+    @FocusState private var focusedField: ConfigFocusField?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -258,25 +311,36 @@ struct FutureJobConfigView: View {
                 .foregroundColor(.secondary)
             
             if !service.savedConfigs.isEmpty {
+                Button(action: {
+                    viewModel.selectedConfig = nil
+                    viewModel.futureUrl = ""
+                    viewModel.params = []
+                }) {
+                    Label("New Configuration", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .padding(.bottom, 2)
+
                 HStack {
                     Text("Saved Configs:")
-                    Picker("", selection: $selectedConfig) {
+                    Picker("", selection: $viewModel.selectedConfig) {
                         Text("Select a preset...").tag(nil as FutureJobConfig?)
                         ForEach(service.savedConfigs, id: \.self) { config in
                             Text(config.url).tag(config as FutureJobConfig?)
                         }
                     }
-                    .onChange(of: selectedConfig) { newValue in
+                    .onChange(of: viewModel.selectedConfig) { newValue in
                         if let config = newValue {
-                            futureUrl = config.url
-                            params = config.params
+                            viewModel.futureUrl = config.url
+                            viewModel.params = config.params
                         }
                     }
                 }
             }
             
-            TextField("Job Path (e.g. job/my-project)", text: $futureUrl)
+            TextField("Job Path (e.g. job/my-project)", text: $viewModel.futureUrl)
                 .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .url)
             
             Text("Parameters")
                 .font(.subheadline)
@@ -284,12 +348,18 @@ struct FutureJobConfigView: View {
             
             ScrollView {
                 VStack {
-                    ForEach($params) { $param in
+                    ForEach($viewModel.params) { $param in
                         HStack {
                             TextField("Key", text: $param.key)
+                                .textFieldStyle(.roundedBorder)
+                                .focused($focusedField, equals: .key($param.wrappedValue.id))
+                                
                             TextField("Value", text: $param.value)
+                                .textFieldStyle(.roundedBorder)
+                                .focused($focusedField, equals: .value($param.wrappedValue.id))
+                                
                             Button(action: {
-                                params.removeAll { $0.id == param.id }
+                                viewModel.params.removeAll { $0.id == $param.wrappedValue.id }
                             }) {
                                 Image(systemName: "minus.circle.fill")
                                     .foregroundColor(.red)
@@ -301,7 +371,7 @@ struct FutureJobConfigView: View {
             }
             
             Button(action: {
-                params.append(JobParam())
+                viewModel.addParam()
             }) {
                 HStack {
                     Image(systemName: "plus.circle.fill")
@@ -324,25 +394,25 @@ struct FutureJobConfigView: View {
         }
         .padding()
         .frame(minWidth: 800, minHeight: 600)
+        .onChange(of: focusedField) { viewModel.currentFocus = $0 }
+        .onChange(of: viewModel.requestedFocus) { focusedField = $0 }
         .onAppear {
-            if let config = job.futureJob {
-                futureUrl = config.url
-                params = config.params
-            }
+            viewModel.setup(job: job)
+        }
+        .onDisappear {
+            viewModel.cleanup()
         }
     }
     
     func saveConfig() {
         var updatedJob = job
-        // Filter out empty params
-        let validParams = params.filter { !$0.key.isEmpty }
-        let newConfig = FutureJobConfig(url: futureUrl, params: validParams)
+        let validParams = viewModel.params.filter { !$0.key.isEmpty }
+        let newConfig = FutureJobConfig(url: viewModel.futureUrl, params: validParams)
         
-        if futureUrl.isEmpty {
+        if viewModel.futureUrl.isEmpty {
              updatedJob.futureJob = nil
         } else {
             updatedJob.futureJob = newConfig
-            // Save to history
             service.saveFutureConfig(newConfig)
         }
         
@@ -389,4 +459,3 @@ struct SettingsView: View {
         .shadow(radius: 2)
     }
 }
-
