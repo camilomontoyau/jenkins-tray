@@ -184,7 +184,7 @@ struct JobRow: View {
                 openConfigWindow()
             }) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .foregroundColor(job.futureJob != nil ? .blue : .secondary)
+                    .foregroundColor(job.futureJobs.isEmpty ? .secondary : .blue)
             }
             .buttonStyle(.plain)
             .padding(.leading, 4)
@@ -192,18 +192,19 @@ struct JobRow: View {
             
             // Trigger Future Job Immediately Button
             Button(action: {
-                if let futureJob = job.futureJob {
-                    service.triggerFutureJob(config: futureJob, parent: job)
+                if let firstFuture = job.futureJobs.first {
+                    let remaining = Array(job.futureJobs.dropFirst())
+                    service.triggerFutureJob(config: firstFuture, parent: job, remainingChain: remaining)
                 }
             }) {
                 Image(systemName: "bolt.fill")
                     .foregroundColor(
-                        (job.status == .success && job.futureJob != nil) ? .yellow : .gray.opacity(0.3)
+                        (job.status == .success && !job.futureJobs.isEmpty) ? .yellow : .gray.opacity(0.3)
                     )
             }
             .buttonStyle(.plain)
             .padding(.leading, 4)
-            .disabled(job.status != .success || job.futureJob == nil)
+            .disabled(job.status != .success || job.futureJobs.isEmpty)
             .help("Trigger Future Job Now")
             
             Button(action: onDelete) {
@@ -238,36 +239,56 @@ struct JobRow: View {
 }
 
 enum ConfigFocusField: Hashable {
-    case url
-    case key(UUID)
-    case value(UUID)
+    case url(UUID)
+    case key(UUID, UUID)
+    case value(UUID, UUID)
+    
+    var stepId: UUID {
+        switch self {
+        case .url(let stepId):
+            return stepId
+        case .key(let stepId, _):
+            return stepId
+        case .value(let stepId, _):
+            return stepId
+        }
+    }
 }
 
 class FutureJobConfigViewModel: ObservableObject {
-    @Published var futureUrl: String = ""
-    @Published var params: [JobParam] = []
+    @Published var steps: [FutureJobConfig] = []
     @Published var selectedConfig: FutureJobConfig?
     
     @Published var currentFocus: ConfigFocusField?
     @Published var requestedFocus: ConfigFocusField?
+    @Published var activeStepId: UUID?
     
     var monitor: Any?
     
     func setup(job: Job) {
-        if let config = job.futureJob {
-            self.futureUrl = config.url
-            self.params = config.params
+        if !job.futureJobs.isEmpty {
+            steps = job.futureJobs
+        } else {
+            steps = [FutureJobConfig()]
+        }
+        
+        activeStepId = steps.first?.id
+        if let firstStep = steps.first {
+            requestedFocus = .url(firstStep.id)
         }
         
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
             if event.keyCode == 48 { // Tab
                 if let focus = self.currentFocus,
-                   case .value(let id) = focus,
-                   id == self.params.last?.id {
+                   case .value(let stepId, let paramId) = focus,
+                   let lastStep = self.steps.last,
+                   stepId == lastStep.id,
+                   let lastParamId = lastStep.params.last?.id,
+                   paramId == lastParamId {
                     
                     DispatchQueue.main.async {
-                        self.addParam()
+                        self.addParam(to: stepId)
                     }
                     return nil
                 }
@@ -276,13 +297,67 @@ class FutureJobConfigViewModel: ObservableObject {
         }
     }
     
-    func addParam() {
-        let newParam = JobParam()
-        params.append(newParam)
-        // Schedule focus update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.requestedFocus = .key(newParam.id)
+    func updateFocus(_ focus: ConfigFocusField?) {
+        currentFocus = focus
+        if let focus = focus {
+            activeStepId = focus.stepId
         }
+    }
+    
+    func reset() {
+        let newStep = FutureJobConfig()
+        steps = [newStep]
+        selectedConfig = nil
+        activeStepId = newStep.id
+        requestedFocus = .url(newStep.id)
+    }
+    
+    func addStep() {
+        let newStep = FutureJobConfig()
+        steps.append(newStep)
+        activeStepId = newStep.id
+        requestedFocus = .url(newStep.id)
+    }
+    
+    func removeStep(at index: Int) {
+        guard steps.indices.contains(index), steps.count > 1 else { return }
+        let removedId = steps[index].id
+        steps.remove(at: index)
+        if activeStepId == removedId {
+            activeStepId = steps.first?.id
+            if let firstStep = steps.first {
+                requestedFocus = .url(firstStep.id)
+            }
+        }
+    }
+    
+    func addParam(to stepId: UUID?) {
+        let targetId = stepId ?? activeStepId ?? steps.last?.id
+        guard let targetId = targetId,
+              let index = steps.firstIndex(where: { $0.id == targetId }) else {
+            return
+        }
+        
+        let newParam = JobParam()
+        steps[index].params.append(newParam)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.requestedFocus = .key(targetId, newParam.id)
+        }
+    }
+    
+    func applyPreset(_ config: FutureJobConfig) {
+        if steps.isEmpty {
+            addStep()
+        }
+        let targetId = activeStepId ?? steps.last?.id
+        guard let targetId = targetId,
+              let index = steps.firstIndex(where: { $0.id == targetId }) else {
+            return
+        }
+        
+        steps[index].url = config.url
+        steps[index].params = config.params
+        requestedFocus = .url(targetId)
     }
     
     func cleanup() {
@@ -310,75 +385,112 @@ struct FutureJobConfigView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             
-            if !service.savedConfigs.isEmpty {
-                Button(action: {
-                    viewModel.selectedConfig = nil
-                    viewModel.futureUrl = ""
-                    viewModel.params = []
-                }) {
-                    Label("New Configuration", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .padding(.bottom, 2)
+            Button(action: {
+                viewModel.reset()
+            }) {
+                Label("New Configuration", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+            .padding(.bottom, 2)
 
-                HStack {
-                    Text("Saved Configs:")
-                    Picker("", selection: $viewModel.selectedConfig) {
-                        Text("Select a preset...").tag(nil as FutureJobConfig?)
-                        ForEach(service.savedConfigs, id: \.self) { config in
-                            Text(config.url).tag(config as FutureJobConfig?)
-                        }
+            HStack {
+                Text("Saved Configs:")
+                Picker("", selection: $viewModel.selectedConfig) {
+                    Text("Select a preset...").tag(nil as FutureJobConfig?)
+                    ForEach(service.savedConfigs, id: \.id) { config in
+                        Text(config.url).tag(config as FutureJobConfig?)
                     }
-                    .onChange(of: viewModel.selectedConfig) { newValue in
-                        if let config = newValue {
-                            viewModel.futureUrl = config.url
-                            viewModel.params = config.params
-                        }
+                }
+                .disabled(service.savedConfigs.isEmpty)
+                .onChange(of: viewModel.selectedConfig) { newValue in
+                    if let config = newValue {
+                        viewModel.applyPreset(config)
+                        viewModel.selectedConfig = nil
                     }
                 }
             }
             
-            TextField("Job Path (e.g. job/my-project)", text: $viewModel.futureUrl)
-                .textFieldStyle(.roundedBorder)
-                .focused($focusedField, equals: .url)
-            
-            Text("Parameters")
+            Text("Steps")
                 .font(.subheadline)
-                .padding(.top, 5)
+                .padding(.top, 6)
             
             ScrollView {
-                VStack {
-                    ForEach($viewModel.params) { $param in
-                        HStack {
-                            TextField("Key", text: $param.key)
-                                .textFieldStyle(.roundedBorder)
-                                .focused($focusedField, equals: .key($param.wrappedValue.id))
-                                
-                            TextField("Value", text: $param.value)
-                                .textFieldStyle(.roundedBorder)
-                                .focused($focusedField, equals: .value($param.wrappedValue.id))
-                                
-                            Button(action: {
-                                viewModel.params.removeAll { $0.id == $param.wrappedValue.id }
-                            }) {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(.red)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(viewModel.steps.indices, id: \.self) { index in
+                        let stepBinding = $viewModel.steps[index]
+                        let stepId = stepBinding.wrappedValue.id
+                        
+                        GroupBox(label: HStack {
+                            Text("Step \(index + 1)")
+                                .font(.subheadline)
+                            Spacer()
+                            if viewModel.steps.count > 1 {
+                                Button(action: {
+                                    viewModel.removeStep(at: index)
+                                }) {
+                                    Image(systemName: "trash")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove Step")
                             }
-                            .buttonStyle(.plain)
+                        }) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextField("Job Path (e.g. job/my-project)", text: stepBinding.url)
+                                    .textFieldStyle(.roundedBorder)
+                                    .focused($focusedField, equals: .url(stepId))
+                                
+                                Text("Parameters")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(stepBinding.params) { $param in
+                                        HStack {
+                                            TextField("Key", text: $param.key)
+                                                .textFieldStyle(.roundedBorder)
+                                                .focused($focusedField, equals: .key(stepId, $param.wrappedValue.id))
+                                            
+                                            TextField("Value", text: $param.value)
+                                                .textFieldStyle(.roundedBorder)
+                                                .focused($focusedField, equals: .value(stepId, $param.wrappedValue.id))
+                                            
+                                            Button(action: {
+                                                viewModel.steps[index].params.removeAll { $0.id == $param.wrappedValue.id }
+                                            }) {
+                                                Image(systemName: "minus.circle.fill")
+                                                    .foregroundColor(.red)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+                                
+                                Button(action: {
+                                    viewModel.addParam(to: stepId)
+                                }) {
+                                    HStack {
+                                        Image(systemName: "plus.circle.fill")
+                                        Text("Add Parameter")
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.top, 4)
                         }
                     }
+                    
+                    Button(action: {
+                        viewModel.addStep()
+                    }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add Step")
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            
-            Button(action: {
-                viewModel.addParam()
-            }) {
-                HStack {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Add Parameter")
-                }
-            }
-            .buttonStyle(.plain)
             
             HStack {
                 Button("Cancel") {
@@ -394,7 +506,7 @@ struct FutureJobConfigView: View {
         }
         .padding()
         .frame(minWidth: 800, minHeight: 600)
-        .onChange(of: focusedField) { viewModel.currentFocus = $0 }
+        .onChange(of: focusedField) { viewModel.updateFocus($0) }
         .onChange(of: viewModel.requestedFocus) { focusedField = $0 }
         .onAppear {
             viewModel.setup(job: job)
@@ -406,15 +518,19 @@ struct FutureJobConfigView: View {
     
     func saveConfig() {
         var updatedJob = job
-        let validParams = viewModel.params.filter { !$0.key.isEmpty }
-        let newConfig = FutureJobConfig(url: viewModel.futureUrl, params: validParams)
-        
-        if viewModel.futureUrl.isEmpty {
-             updatedJob.futureJob = nil
-        } else {
-            updatedJob.futureJob = newConfig
-            service.saveFutureConfig(newConfig)
+        let cleanedSteps = viewModel.steps.compactMap { step -> FutureJobConfig? in
+            let trimmedUrl = step.url.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedUrl.isEmpty {
+                return nil
+            }
+            var cleaned = step
+            cleaned.url = trimmedUrl
+            cleaned.params = step.params.filter { !$0.key.isEmpty }
+            return cleaned
         }
+        
+        updatedJob.futureJobs = cleanedSteps
+        cleanedSteps.forEach { service.saveFutureConfig($0) }
         
         service.updateJob(updatedJob)
         isPresented = false

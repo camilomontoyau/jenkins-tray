@@ -69,10 +69,13 @@ class JenkinsService: ObservableObject {
     }
     
     func saveFutureConfig(_ config: FutureJobConfig) {
-        // Remove existing config with same URL if it exists
-        savedConfigs.removeAll { $0.url == config.url }
-        // Add new one
-        savedConfigs.append(config)
+        if let existingIndex = savedConfigs.firstIndex(where: { $0.url == config.url }) {
+            var updated = config
+            updated.id = savedConfigs[existingIndex].id
+            savedConfigs[existingIndex] = updated
+        } else {
+            savedConfigs.append(config)
+        }
         saveSettings()
     }
     
@@ -145,7 +148,7 @@ class JenkinsService: ObservableObject {
         return cleanedPath
     }
 
-    func addJob(path: String) {
+    func addJob(path: String, futureJobs: [FutureJobConfig] = []) {
         var cleanedPath = extractJobPath(from: path)
         
         // Extract build ID (last component) - must be a number
@@ -157,7 +160,7 @@ class JenkinsService: ObservableObject {
         }
         
         let buildId = String(buildIdInt)
-        let newJob = Job(path: cleanedPath, buildId: buildId, status: .running) // Assume running initially
+        let newJob = Job(path: cleanedPath, buildId: buildId, status: .running, lastChecked: Date(), futureJobs: futureJobs)
         
         DispatchQueue.main.async {
             if !self.jobs.contains(where: { $0.path == cleanedPath }) {
@@ -328,15 +331,13 @@ class JenkinsService: ObservableObject {
                     self.notify(job: updatedJob)
                 }
                 
-                if status == .success, let futureJob = updatedJob.futureJob {
+                if status == .success, let firstFuture = updatedJob.futureJobs.first {
+                    let remainingChain = Array(updatedJob.futureJobs.dropFirst())
                     let delaySeconds = Double(futureJobDelay * 60)
                     print("Scheduling future job trigger in \(futureJobDelay) minutes (\(delaySeconds) seconds)")
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
-                        // Re-verify the job exists and hasn't been removed or changed status? 
-                        // Actually, just fire it. 
-                        // But we might want to ensure 'self' still exists.
-                        self?.triggerFutureJob(config: futureJob, parent: updatedJob)
+                        self?.triggerFutureJob(config: firstFuture, parent: updatedJob, remainingChain: remainingChain)
                     }
                 }
             }
@@ -402,7 +403,7 @@ class JenkinsService: ObservableObject {
     
     // MARK: - Future Job Triggering
     
-    func triggerFutureJob(config: FutureJobConfig, parent: Job) {
+    func triggerFutureJob(config: FutureJobConfig, parent: Job, remainingChain: [FutureJobConfig] = []) {
         guard !url.isEmpty, !config.url.isEmpty else { return }
         
         // Construct build URL
@@ -457,7 +458,7 @@ class JenkinsService: ObservableObject {
                 if httpResponse.statusCode == 201, let location = httpResponse.allHeaderFields["Location"] as? String {
                     // Location header points to queue item
                     print("Future job triggered. Queue Item: \(location)")
-                    self.monitorQueueItem(url: location, jobPath: jobPath)
+                    self.monitorQueueItem(url: location, jobPath: jobPath, remainingChain: remainingChain)
                 } else {
                     print("Failed to trigger future job. Status: \(httpResponse.statusCode)")
                 }
@@ -465,7 +466,7 @@ class JenkinsService: ObservableObject {
         }.resume()
     }
     
-    func monitorQueueItem(url: String, jobPath: String) {
+    func monitorQueueItem(url: String, jobPath: String, remainingChain: [FutureJobConfig] = []) {
         // Poll the queue item until we get an executable URL
         guard let queueUrl = URL(string: url + "api/json") else { return }
         
@@ -496,14 +497,14 @@ class JenkinsService: ObservableObject {
                         
                         // Instead of relying on executable["url"], construct path from jobPath and number
                         let newJobPath = "\(jobPath)/\(number)"
-                        self.addJob(path: newJobPath)
+                        self.addJob(path: newJobPath, futureJobs: remainingChain)
                         
                     } else {
                         // Still in queue or logic differs, keep polling
                         // Add a limit to avoid infinite loops? 
                         // For now just keep polling every 5 seconds
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                            self.monitorQueueItem(url: url, jobPath: jobPath)
+                            self.monitorQueueItem(url: url, jobPath: jobPath, remainingChain: remainingChain)
                         }
                     }
                 }

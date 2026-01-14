@@ -16,12 +16,58 @@ struct Job: Identifiable, Codable, Hashable {
     var buildId: String
     var status: JobStatus = .unknown
     var lastChecked: Date = Date()
-    var futureJob: FutureJobConfig?
+    var futureJobs: [FutureJobConfig] = []
     
     var displayName: String {
         let parts = path.split(separator: "/")
         let names = parts.filter { $0 != "job" && Int($0) == nil }
         return names.joined(separator: " / ")
+    }
+
+    init(
+        id: UUID = UUID(),
+        path: String,
+        buildId: String,
+        status: JobStatus = .unknown,
+        lastChecked: Date = Date(),
+        futureJobs: [FutureJobConfig] = []
+    ) {
+        self.id = id
+        self.path = path
+        self.buildId = buildId
+        self.status = status
+        self.lastChecked = lastChecked
+        self.futureJobs = futureJobs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, path, buildId, status, lastChecked, futureJobs, futureJob
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        path = try container.decode(String.self, forKey: .path)
+        buildId = try container.decode(String.self, forKey: .buildId)
+        status = try container.decodeIfPresent(JobStatus.self, forKey: .status) ?? .unknown
+        lastChecked = try container.decodeIfPresent(Date.self, forKey: .lastChecked) ?? Date()
+
+        let decodedFutureJobs = try container.decodeIfPresent([FutureJobConfig].self, forKey: .futureJobs) ?? []
+        if decodedFutureJobs.isEmpty, let legacyFuture = try container.decodeIfPresent(FutureJobConfig.self, forKey: .futureJob) {
+            futureJobs = [legacyFuture]
+        } else {
+            futureJobs = decodedFutureJobs
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(path, forKey: .path)
+        try container.encode(buildId, forKey: .buildId)
+        try container.encode(status, forKey: .status)
+        try container.encode(lastChecked, forKey: .lastChecked)
+        try container.encode(futureJobs, forKey: .futureJobs)
     }
 }
 
@@ -31,15 +77,10 @@ struct JobParam: Identifiable, Codable, Hashable {
     var value: String = ""
 }
 
-struct FutureJobConfig: Codable, Hashable {
+struct FutureJobConfig: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
     var url: String = ""
     var params: [JobParam] = []
-}
-
-extension Job {
-    // Add mutating method to update future job config if needed, 
-    // but since Job is a struct we likely just modify the property.
-    // However, we need to add the property first.
 }
 
 struct JenkinsResponse: Codable {
