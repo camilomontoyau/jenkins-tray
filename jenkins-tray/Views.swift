@@ -34,7 +34,7 @@ struct ContentView: View {
             // Add Job
             if service.isConfigured {
                 HStack {
-                    TextField("Paste job path here...", text: $newJobPath)
+                    TextField("Paste job URL here...", text: $newJobPath)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit {
                             addJob()
@@ -381,7 +381,7 @@ struct FutureJobConfigView: View {
             Text("Future Run Configuration")
                 .font(.headline)
             
-            Text("Trigger this job when parent finishes successfully:")
+            Text("Trigger these jobs in order when parent finishes successfully:")
                 .font(.caption)
                 .foregroundColor(.secondary)
             
@@ -436,7 +436,7 @@ struct FutureJobConfigView: View {
                             }
                         }) {
                             VStack(alignment: .leading, spacing: 8) {
-                                TextField("Job Path (e.g. job/my-project)", text: stepBinding.url)
+                                TextField("Job URL (e.g. https://jenkins/job/my-project)", text: stepBinding.url)
                                     .textFieldStyle(.roundedBorder)
                                     .focused($focusedField, equals: .url(stepId))
                                 

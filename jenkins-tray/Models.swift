@@ -12,14 +12,21 @@ enum JobStatus: String, Codable {
 
 struct Job: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
-    var path: String // The full path string like "job/dev/..."
+    var path: String // Full job URL (with build id)
     var buildId: String
     var status: JobStatus = .unknown
     var lastChecked: Date = Date()
     var futureJobs: [FutureJobConfig] = []
     
     var displayName: String {
-        let parts = path.split(separator: "/")
+        let pathString: String
+        if let url = URL(string: path), url.scheme != nil {
+            pathString = url.path
+        } else {
+            pathString = path
+        }
+
+        let parts = pathString.split(separator: "/")
         let names = parts.filter { $0 != "job" && Int($0) == nil }
         return names.joined(separator: " / ")
     }
@@ -81,6 +88,23 @@ struct FutureJobConfig: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var url: String = ""
     var params: [JobParam] = []
+
+    enum CodingKeys: String, CodingKey {
+        case id, url, params
+    }
+
+    init(id: UUID = UUID(), url: String = "", params: [JobParam] = []) {
+        self.id = id
+        self.url = url
+        self.params = params
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        url = try container.decodeIfPresent(String.self, forKey: .url) ?? ""
+        params = try container.decodeIfPresent([JobParam].self, forKey: .params) ?? []
+    }
 }
 
 struct JenkinsResponse: Codable {

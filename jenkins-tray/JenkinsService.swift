@@ -69,12 +69,14 @@ class JenkinsService: ObservableObject {
     }
     
     func saveFutureConfig(_ config: FutureJobConfig) {
-        if let existingIndex = savedConfigs.firstIndex(where: { $0.url == config.url }) {
-            var updated = config
-            updated.id = savedConfigs[existingIndex].id
-            savedConfigs[existingIndex] = updated
+        var normalized = config
+        normalized.url = normalizeJobUrl(config.url)
+
+        if let existingIndex = savedConfigs.firstIndex(where: { normalizeJobUrl($0.url) == normalized.url }) {
+            normalized.id = savedConfigs[existingIndex].id
+            savedConfigs[existingIndex] = normalized
         } else {
-            savedConfigs.append(config)
+            savedConfigs.append(normalized)
         }
         saveSettings()
     }
@@ -103,67 +105,61 @@ class JenkinsService: ObservableObject {
         }
     }
     
-    // Helper method to extract path from various inputs
-    func extractJobPath(from input: String) -> String {
-        var cleanedPath = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Handle full URL input
-        if let inputUrl = URL(string: cleanedPath), inputUrl.scheme != nil {
-            // User pasted a full URL (e.g., https://jenkins.com/me/my-views/view/all/job/dev/job/build/123/api/json)
-            // Extract the path component
-            var fullPath = inputUrl.path
-            
-            // Remove /api/json if present (user might paste the full API URL)
-            if fullPath.hasSuffix("/api/json") {
-                fullPath = String(fullPath.dropLast(9)) // Remove "/api/json"
-            }
-            
-            // Find the first "/job/" occurrence and extract everything from there
-            if let jobRange = fullPath.range(of: "/job/") {
-                // Extract everything from the first "/job/" forward
-                cleanedPath = String(fullPath[jobRange.lowerBound...])
-                // Remove leading slash to get "job/..."
-                cleanedPath = cleanedPath.hasPrefix("/") ? String(cleanedPath.dropFirst()) : cleanedPath
-            } else {
-                // No "/job/" found, use the whole path (minus /api/json if it was there)
-                cleanedPath = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
-            }
-        } else {
-            // Not a full URL, but check if it contains "/job/" and extract from there
-            // Also remove /api/json if present
-            if cleanedPath.hasSuffix("/api/json") {
-                cleanedPath = String(cleanedPath.dropLast(9))
-            }
-            
-            if let jobRange = cleanedPath.range(of: "/job/") {
-                cleanedPath = String(cleanedPath[jobRange.lowerBound...])
-                cleanedPath = cleanedPath.hasPrefix("/") ? String(cleanedPath.dropFirst()) : cleanedPath
-            }
+    // Helper methods to normalize and resolve full job URLs
+    private func normalizeJobUrl(_ input: String) -> String {
+        var cleaned = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasSuffix("/api/json") {
+            cleaned = String(cleaned.dropLast(9))
         }
-        
-        // Remove trailing slashes and normalize (remove any double slashes in the path)
-        cleanedPath = cleanedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        cleanedPath = normalizePath(cleanedPath)
-        
-        return cleanedPath
+        while cleaned.hasSuffix("/") {
+            cleaned.removeLast()
+        }
+        return cleaned
+    }
+
+    private func resolveJobUrl(_ input: String) -> String {
+        let cleaned = normalizeJobUrl(input)
+        if let parsed = URL(string: cleaned), parsed.scheme != nil {
+            return cleaned
+        }
+
+        guard !url.isEmpty else { return cleaned }
+        let base = normalizeJobUrl(url)
+        let baseTrimmed = base.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let pathTrimmed = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if pathTrimmed.isEmpty {
+            return baseTrimmed
+        }
+        return "\(baseTrimmed)/\(pathTrimmed)"
+    }
+
+    private func extractBuildId(from input: String) -> String? {
+        let cleaned = resolveJobUrl(input)
+        let pathString: String
+        if let parsed = URL(string: cleaned), parsed.scheme != nil {
+            pathString = parsed.path
+        } else {
+            pathString = cleaned
+        }
+        let components = pathString.split(separator: "/")
+        guard let last = components.last, let buildIdInt = Int(last) else {
+            return nil
+        }
+        return String(buildIdInt)
     }
 
     func addJob(path: String, futureJobs: [FutureJobConfig] = []) {
-        var cleanedPath = extractJobPath(from: path)
+        let cleanedUrl = resolveJobUrl(path)
         
-        // Extract build ID (last component) - must be a number
-        let components = cleanedPath.split(separator: "/")
-        guard let last = components.last, let buildIdInt = Int(last) else {
-            // Invalid format - no build ID found
-            print("Error: Could not extract build ID from path: \(cleanedPath)")
+        guard let buildId = extractBuildId(from: cleanedUrl) else {
+            print("Error: Could not extract build ID from url: \(cleanedUrl)")
             return
         }
         
-        let buildId = String(buildIdInt)
-        let newJob = Job(path: cleanedPath, buildId: buildId, status: .running, lastChecked: Date(), futureJobs: futureJobs)
+        let newJob = Job(path: cleanedUrl, buildId: buildId, status: .running, lastChecked: Date(), futureJobs: futureJobs)
         
         DispatchQueue.main.async {
-            if !self.jobs.contains(where: { $0.path == cleanedPath }) {
+            if !self.jobs.contains(where: { $0.path == cleanedUrl }) {
                 self.jobs.insert(newJob, at: 0)
                 self.saveJobs()
                 self.checkJob(newJob) // Check immediately
@@ -201,30 +197,14 @@ class JenkinsService: ObservableObject {
     }
     
     func getApiUrl(for job: Job) -> String {
-        guard !url.isEmpty else { return "" }
-        
-        // Construct URL ensuring no double slashes (except in protocol)
-        // Remove trailing slashes from base URL (but preserve protocol)
-        var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        
-        // Normalize job path (remove leading/trailing slashes and double slashes)
-        var jobPath = job.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        jobPath = normalizePath(jobPath)
-        
-        // Construct the full URL: baseUrl + "/" + jobPath + "/api/json"
-        // This ensures exactly one slash between each component
-        return "\(baseUrl)/\(jobPath)/api/json"
+        let resolved = resolveJobUrl(job.path)
+        guard !resolved.isEmpty else { return "" }
+        return "\(resolved)/api/json"
     }
 
     func getJobWebUrl(for job: Job) -> URL? {
-        guard !url.isEmpty else { return nil }
-        
-        var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        var jobPath = job.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        jobPath = normalizePath(jobPath)
-        
-        let urlString = "\(baseUrl)/\(jobPath)"
-        return URL(string: urlString)
+        let resolved = resolveJobUrl(job.path)
+        return resolved.isEmpty ? nil : URL(string: resolved)
     }
     
     func checkJob(_ job: Job) {
@@ -375,17 +355,6 @@ class JenkinsService: ObservableObject {
         }
     }
     
-    // Helper function to remove double slashes from paths
-    // This only works on paths (not full URLs with protocols)
-    private func normalizePath(_ path: String) -> String {
-        var normalized = path
-        // Remove all double slashes (but preserve single slashes)
-        while normalized.contains("//") {
-            normalized = normalized.replacingOccurrences(of: "//", with: "/")
-        }
-        return normalized
-    }
-    
     func sendFallbackNotification(title: String, subtitle: String, body: String) {
         // AppleScript: display notification "message" with title "title" subtitle "subtitle"
         // Sanitize inputs (basic)
@@ -404,19 +373,12 @@ class JenkinsService: ObservableObject {
     // MARK: - Future Job Triggering
     
     func triggerFutureJob(config: FutureJobConfig, parent: Job, remainingChain: [FutureJobConfig] = []) {
-        guard !url.isEmpty, !config.url.isEmpty else { return }
+        guard !config.url.isEmpty else { return }
         
-        // Construct build URL
-        // config.url is expected to be the path like "job/my-job"
-        // Base URL + Path + /build OR /buildWithParameters
-        
-        var baseUrl = url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        
-        // Use the helper to extract a clean path from potentially full URL inputs
-        var jobPath = extractJobPath(from: config.url)
-        
+        // Construct build URL from the full job URL (no path extraction)
+        let baseJobUrl = resolveJobUrl(config.url)
         let endpoint = config.params.isEmpty ? "build" : "buildWithParameters"
-        let buildUrlString = "\(baseUrl)/\(jobPath)/\(endpoint)"
+        let buildUrlString = "\(baseJobUrl)/\(endpoint)"
         
         guard var components = URLComponents(string: buildUrlString) else {
             print("Invalid URL for future job: \(buildUrlString)")
@@ -458,7 +420,7 @@ class JenkinsService: ObservableObject {
                 if httpResponse.statusCode == 201, let location = httpResponse.allHeaderFields["Location"] as? String {
                     // Location header points to queue item
                     print("Future job triggered. Queue Item: \(location)")
-                    self.monitorQueueItem(url: location, jobPath: jobPath, remainingChain: remainingChain)
+                    self.monitorQueueItem(url: location, jobPath: baseJobUrl, remainingChain: remainingChain)
                 } else {
                     print("Failed to trigger future job. Status: \(httpResponse.statusCode)")
                 }
@@ -496,8 +458,8 @@ class JenkinsService: ObservableObject {
                         print("Queue item executed. Build #\(number)")
                         
                         // Instead of relying on executable["url"], construct path from jobPath and number
-                        let newJobPath = "\(jobPath)/\(number)"
-                        self.addJob(path: newJobPath, futureJobs: remainingChain)
+                        let newJobUrl = "\(jobPath)/\(number)"
+                        self.addJob(path: newJobUrl, futureJobs: remainingChain)
                         
                     } else {
                         // Still in queue or logic differs, keep polling
