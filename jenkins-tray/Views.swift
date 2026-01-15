@@ -436,7 +436,7 @@ struct FutureJobConfigView: View {
                             }
                         }) {
                             VStack(alignment: .leading, spacing: 8) {
-                                TextField("Job URL (e.g. https://jenkins/job/my-project)", text: stepBinding.url)
+                                TextField("Job URL (e.g. https://jenkins.mycompany.com/job/my-project)", text: stepBinding.url)
                                     .textFieldStyle(.roundedBorder)
                                     .focused($focusedField, equals: .url(stepId))
                                 
